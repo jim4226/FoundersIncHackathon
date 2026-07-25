@@ -28,6 +28,7 @@ git fetch origin --prune
 git diff --check
 python -m compileall -q backend gesture
 node --check web/app.js
+node --check web/desk.js
 ```
 
 If the base branch moved, merge it normally and resolve conflicts before

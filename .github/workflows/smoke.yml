@@ -22,7 +22,9 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q backend gesture
       - name: Check browser JavaScript
-        run: node --check web/app.js
+        run: |
+          node --check web/app.js
+          node --check web/desk.js
       - name: Check whitespace
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}

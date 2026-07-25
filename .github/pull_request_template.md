@@ -11,6 +11,7 @@
 - [ ] `git diff --check`
 - [ ] `python -m compileall -q backend gesture`
 - [ ] `node --check web/app.js`
+- [ ] `node --check web/desk.js`
 - [ ] Netlify deploy preview inspected
 
 Deploy preview:
