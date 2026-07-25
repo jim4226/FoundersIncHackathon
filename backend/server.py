@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -312,11 +312,17 @@ if WEB_DIR.exists():
         return FileResponse(WEB_DIR / "index.html")
 
     @app.get("/hold")
-    def hold() -> FileResponse:
+    def hold() -> RedirectResponse:
         """The CAD-in-hand view. Needs a camera, so it lives on its own page --
         and it is the same WebSocket stream underneath, which is why the part in
-        your hand can be the part the bench says you are attending to."""
-        return FileResponse(WEB_DIR / "hold.html")
+        your hand can be the part the bench says you are attending to.
+
+        Redirected rather than served here so the page resolves its assets
+        relatively. That is what lets the identical file be served straight out
+        of web/ by any static file server, which is how you run it on a laptop
+        with no Python at all -- see 'Run it on your own laptop' in the README.
+        """
+        return RedirectResponse("/static/hold.html")
 
 
 if __name__ == "__main__":

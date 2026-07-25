@@ -95,6 +95,39 @@ guardrail on the table.
 | `[` `]` | calibrate knuckle span, if the scale looks off |
 | `f` | freeze tracking |
 
+### Run it on your own laptop
+
+**The browser has to be on the machine the camera is plugged into.** No amount
+of port-forwarding gets a remote page to your webcam, so `/hold` has to be
+served from your laptop. It needs no backend and no Python packages to do that:
+
+```bash
+git clone https://github.com/jim4226/FoundersIncHackathon.git
+cd FoundersIncHackathon
+git checkout claude/cad-renders-hand-display-0d7rrq
+
+cd web && python3 -m http.server 8080
+```
+
+Open **`http://localhost:8080/hold.html`** and allow the camera. That is the
+whole setup — every asset the page needs is in `web/`, and the geometry and
+renderer have no dependencies at all. Only the hand tracker is fetched from the
+network, and without a bench running the header just reads `bench offline`.
+
+Then, when you want the fused loop as well, run the real thing and use
+`http://localhost:8000/hold` instead:
+
+```bash
+pip install -r requirements.txt
+python -m backend.server
+```
+
+> **It must be `localhost`.** Browsers only expose cameras in a *secure
+> context* — `https://`, or `localhost`. Reaching the same server by LAN
+> address (`http://192.168.1.x:8080`) gives you a page with no camera and no
+> obvious reason why. The page detects this and says so rather than failing
+> blank, but the fix is always to open it as `localhost`.
+
 ### Two cameras, two jobs
 
 The bench runs **two** cameras at once and they must not fight over a device:

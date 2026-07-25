@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bench — hold it</title>
-<link rel="stylesheet" href="/static/style.css">
-<link rel="stylesheet" href="/static/hold.css">
+<!-- Relative, not absolute: this page has to work both mounted under the bench
+     at /static/hold.html and served straight out of the web/ folder by any
+     static file server, which is how you run it on a laptop with no backend. -->
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="hold.css">
 </head>
 <body class="hold-page">
 
@@ -28,7 +31,7 @@
       <span class="signal-label">effort</span>
       <span class="signal-value" id="effort">—</span>
     </div>
-    <a class="back" href="/">← the table</a>
+    <a class="back" href="index.html">← the table</a>
   </div>
 </header>
 
@@ -143,7 +146,7 @@
 
 </main>
 
-<script src="/static/cad.js"></script>
-<script src="/static/hold.js"></script>
+<script src="cad.js"></script>
+<script src="hold.js"></script>
 </body>
 </html>

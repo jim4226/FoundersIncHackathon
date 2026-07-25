@@ -227,7 +227,15 @@ async function boot() {
   state.mirror = localStorage.getItem(MIRROR_KEY) !== 'off';
   el('toggle-mirror').checked = state.mirror;
 
-  if (!params.has('sim')) {
+  if (params.has('sim')) {
+    setMode('simulated', 'forced by ?sim');
+  } else if (!navigator.mediaDevices || !window.isSecureContext) {
+    // Browsers only expose cameras on https:// or localhost. Reaching the page
+    // by LAN address over plain http is the usual way to land here, and the
+    // symptom is a bare "undefined" from mediaDevices -- so name it instead.
+    setMode('simulated', `no camera on ${location.protocol}//${location.hostname} — open it as localhost or over https`);
+    el('camera-count').textContent = 'blocked';
+  } else {
     try {
       setMode('starting', 'opening camera');
       const label = await startCamera(params.get('cam') || localStorage.getItem(CAM_KEY));
@@ -242,8 +250,6 @@ async function boot() {
       stopCamera();
       setMode('simulated', String(err && err.message ? err.message : err).slice(0, 80));
     }
-  } else {
-    setMode('simulated', 'forced by ?sim');
   }
   requestAnimationFrame(loop);
 }
