@@ -14,8 +14,11 @@ import json
 import threading
 
 import cv2
+import numpy as np
 import mediapipe as mp
 from websockets.sync.server import serve
+
+HAND_CONNECTIONS = mp.solutions.hands.HAND_CONNECTIONS
 
 # ----------------------------- config ---------------------------------
 CONF_THRESHOLD = 0.6      # min gesture confidence to consider
@@ -68,7 +71,7 @@ GestureRecognizer = mp.tasks.vision.GestureRecognizer
 GestureRecognizerOptions = mp.tasks.vision.GestureRecognizerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-latest = {"name": None, "score": 0.0}
+latest = {"name": None, "score": 0.0, "landmarks": None}
 
 
 def on_result(result, output_image, timestamp_ms):
@@ -77,6 +80,7 @@ def on_result(result, output_image, timestamp_ms):
         latest["name"], latest["score"] = top.category_name, top.score
     else:
         latest["name"], latest["score"] = None, 0.0
+    latest["landmarks"] = result.hand_landmarks[0] if result.hand_landmarks else None
 
 
 # ------------------ debounce / one-gesture-one-event ------------------
@@ -98,6 +102,28 @@ def maybe_fire(now: float):
         _state["candidate"], _state["since"] = None, now  # require fresh hold
         return mapped
     return None
+
+
+def draw_hand(frame, landmarks, color):
+    """Neon skeleton + translucent silhouette glow over the tracked hand."""
+    h, w = frame.shape[:2]
+    pts = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
+
+    # translucent filled silhouette (convex hull) for the "glow" body
+    overlay = frame.copy()
+    hull = cv2.convexHull(np.array(pts, dtype=np.int32))
+    cv2.fillConvexPoly(overlay, hull, color)
+    cv2.addWeighted(overlay, 0.22, frame, 0.78, 0, dst=frame)
+
+    # bones: thick color glow underneath, thin white core on top
+    for a, b in HAND_CONNECTIONS:
+        cv2.line(frame, pts[a], pts[b], color, 6, cv2.LINE_AA)
+        cv2.line(frame, pts[a], pts[b], (255, 255, 255), 1, cv2.LINE_AA)
+
+    # joints
+    for p in pts:
+        cv2.circle(frame, p, 5, color, -1, cv2.LINE_AA)
+        cv2.circle(frame, p, 8, color, 1, cv2.LINE_AA)
 
 
 def emit(vote: str, source: str):
@@ -143,8 +169,11 @@ def main():
             # ---- on-screen feedback (looks good + helps debugging) ----
             name = latest["name"]
             label = f'{name} {latest["score"]:.2f}' if name else "..."
-            color = (0, 200, 0) if name == "Thumb_Up" else \
-                    (0, 0, 255) if name == "Thumb_Down" else (200, 200, 200)
+            # BGR: green approve, red reject, cyan neutral
+            color = (90, 220, 60) if name == "Thumb_Up" else \
+                    (60, 60, 255) if name == "Thumb_Down" else (255, 255, 0)
+            if latest["landmarks"]:
+                draw_hand(frame, latest["landmarks"], color)
             cv2.putText(frame, label, (20, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
             if fired:
