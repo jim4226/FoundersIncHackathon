@@ -43,6 +43,8 @@ class DeskBridge:
         self.status = "idle"
         self.calibrated = False
         self.objects: list[dict] = []
+        self.hands: list[dict] = []
+        self.hands_available = False
         self.last_jpeg: str | None = None
         self._task: asyncio.Task | None = None
 
@@ -80,8 +82,30 @@ class DeskBridge:
                     continue
                 self.calibrated = bool(payload.get("calibrated"))
                 self.objects = payload.get("objects") or []
+                self.hands = payload.get("hands") or []
+                self.hands_available = bool(payload.get("handsAvailable"))
                 self.last_jpeg = payload.get("jpeg")
                 await self.on_frame(payload)
+
+
+def handled_variant(objects: list[dict], hands: list[dict], variants: list) -> str | None:
+    """Which variant a hand is currently on, if any.
+
+    The hand is a far more direct referent than inferred gaze: reaching for a
+    thing is unambiguous in a way that looking in its direction is not. The
+    camera resolves WHAT, which leaves the headband only to say how much it
+    mattered -- and the two agreeing is a stronger signal than either alone.
+    """
+    touched = {h.get("touching") for h in hands if h.get("touching")}
+    if not touched:
+        return None
+
+    live = [v for v in variants if v.status != "archived"]
+    ordered = sorted(objects, key=lambda o: o.get("position", 0.0))
+    for index, obj in enumerate(ordered):
+        if obj.get("id") in touched and index < len(live):
+            return live[index].id
+    return None
 
 
 def bind_objects_to_variants(objects: list[dict], variants: list) -> dict[str, float]:

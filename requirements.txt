@@ -13,5 +13,11 @@ websockets>=13.0
 # Desk camera object detection (desk/desk_server.py).
 opencv-python>=4.9
 
+# Optional: hand landmarks on the desk camera. Without it the desk still detects
+# objects, it just cannot report which one your hand is on. Also needs the model:
+#   curl -o desk/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+# On headless Linux: apt-get install libgles2 libegl1
+mediapipe>=0.10.21
+
 # Only needed for EEG_SOURCE=brainflow. Native BLE; dongles deprecated in 5.22.0.
 brainflow>=5.22.2

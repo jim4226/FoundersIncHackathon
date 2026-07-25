@@ -30,7 +30,7 @@ from . import boxic
 from .agent import ProjectAgent
 from .eeg.attention import LateralAttention
 from .eeg.metrics import EffortEstimator
-from .desk import DeskBridge, bind_objects_to_variants
+from .desk import DeskBridge, bind_objects_to_variants, handled_variant
 from .eeg.sources import SimulatedSource, build_source
 from .gesture import GestureBridge
 from .store import HIGH_EFFORT_THRESHOLD, LOW_EFFORT_THRESHOLD, ProjectStore
@@ -48,6 +48,7 @@ source = build_source(os.environ.get("EEG_SOURCE", "sim"), estimator, attention)
 
 _clients: set[WebSocket] = set()
 _state: dict = {"effort": None, "attention": None, "lastFlag": None}
+_last_desk_ts: float = 0.0
 
 
 async def _broadcast(payload: dict) -> None:
@@ -108,7 +109,8 @@ async def _tick_loop() -> None:
             "source": {"kind": source.name, "status": source.status, "error": source.error},
             "gesture": {"status": gestures.status},
             "desk": {"status": desk.status, "calibrated": desk.calibrated,
-                     "objects": len(desk.objects)},
+                     "objects": len(desk.objects), "hands": len(desk.hands),
+                     "handsAvailable": desk.hands_available},
         })
 
 
@@ -190,13 +192,29 @@ async def _on_desk_frame(payload: dict) -> None:
     across the table moves its zone with it.
     """
     objects = payload.get("objects") or []
+    hands = payload.get("hands") or []
     if objects:
         attention.set_zones(bind_objects_to_variants(objects, store.variants))
+
+    # Handling time accrues to whichever design a hand is actually on. Kept
+    # separate from attention: looking at something and picking it up are
+    # different kinds of interest, and collapsing them would overstate both.
+    global _last_desk_ts
+    now = time.time()
+    elapsed = min(0.5, now - _last_desk_ts) if _last_desk_ts else 0.0
+    _last_desk_ts = now
+
+    held = handled_variant(objects, hands, store.variants)
+    if held and elapsed:
+        store.add_interaction(held, elapsed)
 
     await _broadcast({
         "type": "desk",
         "calibrated": payload.get("calibrated", False),
         "objects": objects,
+        "hands": hands,
+        "handsAvailable": payload.get("handsAvailable", False),
+        "handledVariant": held,
         "width": payload.get("width"),
         "height": payload.get("height"),
         "jpeg": payload.get("jpeg"),

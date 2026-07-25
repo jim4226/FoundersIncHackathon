@@ -30,6 +30,7 @@ import argparse
 import base64
 import json
 import math
+import os
 import threading
 import time
 
@@ -48,6 +49,16 @@ MAX_AREA_FRAC = 0.30   # ignore whole-frame lighting changes
 DIFF_THRESHOLD = 28
 BORDER_MARGIN = 6      # px; a blob this close to the edge is an arm
 MATCH_RADIUS_FRAC = 0.12
+# ~2.5 s at 12 fps. Long enough to cover a hand resting on an object, short
+# enough that something actually removed from the desk disappears promptly.
+OCCLUSION_GRACE_FRAMES = 30
+
+# Hand tracking. Optional: without mediapipe or the model file the desk still
+# detects objects, it just cannot report what the hand is touching.
+HAND_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "hand_landmarker.task")
+INDEX_TIP = 8          # MediaPipe hand landmark index for the index fingertip
+TOUCH_RADIUS_FRAC = 0.16
 
 clients, clients_lock = set(), threading.Lock()
 state = {"objects": [], "reference": None, "frame": None}
@@ -89,7 +100,18 @@ def start_ws() -> None:
 # ------------------------------------------------------------- detection
 
 class Tracker:
-    """Nearest-centroid matching so an object keeps its id while it moves."""
+    """Nearest-centroid matching so an object keeps its id while it moves.
+
+    Objects also SURVIVE briefly after they stop being detected, which is not a
+    nicety -- it is required for correctness. Reaching for an object merges its
+    blob into the arm, and the arm runs off the edge of the frame, so the border
+    heuristic that (correctly) rejects arms takes the object with it. Without
+    persistence a design vanishes at the exact moment someone touches it, which
+    is the one moment the system most needs to know it is there.
+
+    A vanished object keeps its last known position and is flagged `occluded`
+    until the grace period expires.
+    """
 
     def __init__(self):
         self._next_id = 1
@@ -114,7 +136,18 @@ class Tracker:
                 det["id"] = f"obj_{self._next_id}"
                 det["label"] = f"Object {self._next_id}"
                 self._next_id += 1
+            det["missing"] = 0
+            det["occluded"] = False
             result.append(det)
+
+        # Carry unmatched priors forward for a moment before giving up on them.
+        for prior in unmatched:
+            missing = prior.get("missing", 0) + 1
+            if missing <= OCCLUSION_GRACE_FRAMES:
+                carried = dict(prior)
+                carried["missing"] = missing
+                carried["occluded"] = True
+                result.append(carried)
 
         # Sort left to right so labels read naturally on the desk.
         result.sort(key=lambda d: d["centroid"][0])
@@ -157,6 +190,107 @@ def detect(frame: np.ndarray, reference: np.ndarray) -> list[dict]:
     return found
 
 
+# ------------------------------------------------------------------ hands
+
+class Hands:
+    """MediaPipe hand landmarks over the desk.
+
+    Overhead, the interesting landmark is the index fingertip: it answers "which
+    of these am I touching", which is a far more direct referent than inferring
+    it from gaze. The camera resolves WHAT, the headband is left to say how much
+    it mattered.
+
+    Entirely optional. If mediapipe is absent or the model has not been
+    downloaded, `detect` returns nothing and the desk service carries on doing
+    object detection -- the demo degrades rather than dies.
+    """
+
+    def __init__(self, model_path: str = HAND_MODEL):
+        self.available = False
+        self.reason = ""
+        self._landmarker = None
+        try:
+            import mediapipe as mp
+        except ImportError:
+            self.reason = "mediapipe not installed"
+            return
+        if not os.path.exists(model_path):
+            self.reason = f"model missing: {os.path.basename(model_path)}"
+            return
+        try:
+            base = mp.tasks.BaseOptions(model_asset_path=model_path)
+            options = mp.tasks.vision.HandLandmarkerOptions(
+                base_options=base,
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                num_hands=2,
+                min_hand_detection_confidence=0.5,
+                min_hand_presence_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+            self._landmarker = mp.tasks.vision.HandLandmarker.create_from_options(options)
+            self._mp = mp
+            self.available = True
+        except Exception as exc:  # noqa: BLE001 - hands are a bonus, never fatal
+            self.reason = f"{type(exc).__name__}: {exc}"
+
+    def detect(self, frame: np.ndarray, timestamp_ms: int) -> list[dict]:
+        if not self.available:
+            return []
+        try:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+            result = self._landmarker.detect_for_video(image, timestamp_ms)
+        except Exception:  # noqa: BLE001 - a dropped frame is not worth dying for
+            return []
+
+        hands = []
+        for i, landmarks in enumerate(result.hand_landmarks or []):
+            handedness = "unknown"
+            try:
+                handedness = result.handedness[i][0].category_name
+            except (IndexError, AttributeError):
+                pass
+            tip = landmarks[INDEX_TIP]
+            hands.append({
+                "handedness": handedness,
+                # Normalised 0-1 so the overlay can scale them to any display.
+                "landmarks": [[round(p.x, 4), round(p.y, 4)] for p in landmarks],
+                "indexTip": [round(tip.x, 4), round(tip.y, 4)],
+                "position": round(tip.x * 2 - 1, 3),
+            })
+        return hands
+
+
+def resolve_touch(hands: list[dict], objects: list[dict], width: int, height: int) -> None:
+    """Annotate each hand with the object its index fingertip is on or nearest.
+
+    Inside the bounding box counts as touching outright; otherwise the nearest
+    object within TOUCH_RADIUS_FRAC of the frame width counts as reaching for.
+    Objects are annotated in turn so the overlay can highlight what is in hand.
+    """
+    for obj in objects:
+        obj["touchedBy"] = None
+
+    radius = width * TOUCH_RADIUS_FRAC
+    for hand in hands:
+        tx, ty = hand["indexTip"][0] * width, hand["indexTip"][1] * height
+        hand["touching"] = None
+        best, best_dist = None, radius
+
+        for obj in objects:
+            x, y, w, h = obj["bbox"]
+            if x <= tx <= x + w and y <= ty <= y + h:
+                best, best_dist = obj, -1.0     # inside the box wins outright
+                break
+            dist = math.dist((tx, ty), (obj["centroid"][0], obj["centroid"][1]))
+            if dist < best_dist:
+                best, best_dist = obj, dist
+
+        if best is not None:
+            hand["touching"] = best["id"]
+            best["touchedBy"] = hand["handedness"]
+
+
 # ------------------------------------------------------------- synthetic
 
 def synthetic_frames():
@@ -195,6 +329,8 @@ def main() -> None:
 
     threading.Thread(target=start_ws, daemon=True).start()
     tracker = Tracker()
+    hands = Hands()
+    print(f"[desk] hands: {'on' if hands.available else 'off — ' + hands.reason}")
 
     if args.synthetic:
         frames = synthetic_frames()
@@ -231,6 +367,8 @@ def main() -> None:
             print("[desk] reference captured automatically")
 
         objects = tracker.update(detect(frame, reference), FRAME_W) if reference is not None else []
+        found_hands = hands.detect(frame, int(time.time() * 1000))
+        resolve_touch(found_hands, objects, FRAME_W, FRAME_H)
 
         # Broadcast the CLEAN frame. Boxes and labels are the desk view's job --
         # it knows which variant each object is bound to and which one is being
@@ -250,6 +388,8 @@ def main() -> None:
                     }
                     for obj in objects
                 ],
+                "hands": found_hands,
+                "handsAvailable": hands.available,
                 "jpeg": base64.b64encode(buf).decode("ascii"),
             })
 
@@ -263,7 +403,12 @@ def main() -> None:
                 cv2.rectangle(display, (x, y), (x + w, y + h), (224, 200, 69), 2)
                 cv2.putText(display, obj["label"], (x, y - 9),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (224, 200, 69), 2)
-            banner = "press 'c' with an empty desk" if reference is None else f"{len(objects)} object(s)"
+            for hand in found_hands:
+                hx = int(hand["indexTip"][0] * FRAME_W)
+                hy = int(hand["indexTip"][1] * FRAME_H)
+                cv2.circle(display, (hx, hy), 9, (120, 255, 180), 2)
+            banner = ("press 'c' with an empty desk" if reference is None
+                      else f"{len(objects)} object(s), {len(found_hands)} hand(s)")
             cv2.putText(display, banner, (18, 38),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (224, 200, 69), 2)
             cv2.imshow("desk", display)
