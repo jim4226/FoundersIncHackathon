@@ -9,3 +9,15 @@
   to = "/:splat"
   status = 200
   force = true
+
+# FastAPI exposes these clean URLs locally. Keep the same navigation working
+# when Netlify serves the corresponding static HTML files.
+[[redirects]]
+  from = "/desk"
+  to = "/desk.html"
+  status = 200
+
+[[redirects]]
+  from = "/project"
+  to = "/project.html"
+  status = 200

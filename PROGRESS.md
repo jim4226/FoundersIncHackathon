@@ -4,10 +4,17 @@ Last reviewed: 2026-07-24
 
 ## Live surfaces
 
-- Production: https://foundersinchacknight.netlify.app
-- GitHub: https://github.com/jim4226/FoundersIncHackathon
-- Current production branch: `claude/camera-eeg-hackathon-6v864b`
+- Deployment target: https://foundersinchacknight.netlify.app
+- Authoritative repository and coordination record:
+  https://github.com/jim4226/FoundersIncHackathon
+- Currently deployed branch: `claude/camera-eeg-hackathon-6v864b`
 - Target stable production branch: `main` after PR #1 is verified and merged
+
+GitHub branches, pull requests, and issues are the source of truth. Netlify is
+only the rendered output used to inspect a branch.
+
+Before the consolidation PR to `main` merges, any open PR targeting the current
+deployed branch must be merged there or retargeted to `main`.
 
 ## Product focus
 

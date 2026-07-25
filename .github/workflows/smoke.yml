@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - claude/camera-eeg-hackathon-6v864b
 
 jobs:
   smoke:
@@ -20,7 +21,7 @@ jobs:
         with:
           node-version: "22"
       - name: Compile Python
-        run: python -m compileall -q backend gesture
+        run: python -m compileall -q backend gesture desk
       - name: Check browser JavaScript
         run: find web -type f -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Check whitespace
