@@ -113,6 +113,19 @@ class LateralAttention:
         self._selected: str | None = None
 
     def set_zones(self, zones: dict[str, float]) -> None:
+        """Update zone placement, preserving dwell when only positions moved.
+
+        The desk camera re-reports object positions at frame rate, so this is
+        called many times a second with the same objects at slightly different
+        coordinates. Resetting the dwell timer on every call would pin
+        confidence at its floor and make selection impossible -- an object
+        sliding a few pixels is not a new object. Only a change in WHICH zones
+        exist invalidates the current dwell.
+        """
+        if set(zones) == set(self.zones):
+            self.zones = dict(zones)
+            return
+
         self.zones = dict(zones)
         self._zone = None
         self._zone_since = time.time()

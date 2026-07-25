@@ -18,8 +18,8 @@ reason over.
 
 | Piece | What it does | Status |
 |---|---|---|
-| **Desk live view** | Prism's overhead camera + projector. Sees what's on the table, recognises objects, projects the UI back down onto the surface. | Needs Prism SDK — see *Open questions* |
-| **Control view** | The screen version of the desk. Lay out what's on it, add design variants, drive the demo. | ✅ Built |
+| **Desk view** | Second camera over the desk. Detects whatever you put down and draws the overlay on a second screen. Our own stand-in for Prism. | ✅ Built (`desk/`) |
+| **Control view** | The operator's screen. Effort breakdown, project history, agent console, stage controls. | ✅ Built |
 | **Operator state** | Muse EEG. Effort level, and a deliberate flag gesture. | ✅ Built and tested |
 | **Gesture** | MediaPipe thumbs-up/down → `design_vote` on `ws://localhost:8765`. | ✅ Built (`gesture/`) |
 | **Boxic** | The living project record for hardware. Where history, versions and decisions actually live. | ✅ Mapped (`backend/boxic.py`) — needs one write tool |
@@ -144,13 +144,55 @@ diffuse → locked 15 s     |     re-engaged → unlocked 6 s
 
 ---
 
+## Two screens
+
+| Screen | URL | Who looks at it |
+|---|---|---|
+| **Desk** | `/desk` | The audience. Live camera of the table with the overlay drawn on top. |
+| **Control** | `/` | You. Effort breakdown, history, agent console, stage controls. |
+
+We have no Prism SDK, so `desk/desk_server.py` does the seeing half with a
+second webcam and puts the drawing half on a screen instead of a projector. For
+a demo that is arguably better — the audience sees the desk and the overlay in
+one frame, rather than trying to read projected light off a table under stage
+lights.
+
+Detection is background subtraction against an empty-desk reference, not a
+trained model: no download, no labels, no GPU, runs at camera rate, and it does
+not care what you put down. Two heuristics carry it — anything touching the
+frame border is an arm reaching in rather than an object on the desk, and
+objects are matched between frames by nearest centroid so ids stay stable while
+you slide something around.
+
+The join is one number. The camera reports each object's normalised left-to-right
+`position` on `[-1, +1]`; that is the same axis the headband reports gaze on. So
+**the camera says where things are, the headband says which one you mean**, and
+neither needs to know the other exists. Move an object across the table and its
+zone moves with it.
+
 ## Run it
 
 ```bash
 pip install -r requirements.txt
 python -m backend.server          # simulated subject, no hardware needed
-# open http://localhost:8000
+# control view  http://localhost:8000
+# desk view     http://localhost:8000/desk
 ```
+
+The desk camera, in its own terminal:
+
+```bash
+python desk/desk_server.py                 # real camera (--camera N to pick one)
+python desk/desk_server.py --synthetic     # fake desk, no camera needed
+```
+
+Clear the desk and press `c` in its preview window to capture the reference
+frame, then put your objects down. `--synthetic` and `--headless` capture the
+reference automatically.
+
+> **Camera indices matter.** `gesture_server.py` uses camera `0` for the hand and
+> `desk_server.py` uses `1` for the desk. If either grabs the wrong one, pass
+> `--camera N` to the desk service or edit `CAM_INDEX` in the gesture one.
 
 With a real Muse:
 
@@ -208,12 +250,15 @@ backend/eeg/metrics.py     effort score, blink + clench detection
 backend/eeg/attention.py   calibration-free left/right attention
 backend/eeg/sources.py     Mind Monitor / BrainFlow / simulator
 backend/gesture.py         bridge to gesture_server.py votes
+backend/desk.py            bridge to the desk camera, binds objects to variants
 backend/boxic.py           mapping onto Boxic versions + decisions
 backend/store.py           project, variants, effort-scored history
 backend/agent.py           the effort gate
 backend/server.py          WebSocket + REST
 gesture/                   MediaPipe thumbs up/down (teammate's module)
-web/                       control view
+desk/                      desk camera + object detection
+web/index.html             control view
+web/desk.html              desk view (second screen)
 ```
 
 Run both processes for the full loop:
@@ -287,9 +332,12 @@ read-only. **One `commit_decision` tool taking the shape above closes the loop.*
 
 ## Open questions
 
-- **Prism SDK.** No public developer surface documented. Resolve early: can we
-  get object detections and project custom content, or do we roll our own
-  overhead camera + projector rig?
+- **Prism.** No public developer surface, so `desk/` is our own version of the
+  seeing half. If Prism access lands, it drops in behind the same interface —
+  it only has to report object positions on `[-1, +1]`.
+- **Lighting.** Background subtraction is sensitive to the room lights changing
+  after the reference frame is captured. Re-press `c` if the desk drifts, and
+  capture the reference under the lighting you will actually present in.
 - **Which Muse?** Muse 2 / S: every software path works. Athena (MS-03): needs
   BrainFlow ≥ 5.22.2, muselsl ≥ 2.5.0, or Mind Monitor ≥ 2.4.3 — BlueMuse and
   Petal are out.

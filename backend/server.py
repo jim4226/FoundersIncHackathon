@@ -30,6 +30,7 @@ from . import boxic
 from .agent import ProjectAgent
 from .eeg.attention import LateralAttention
 from .eeg.metrics import EffortEstimator
+from .desk import DeskBridge, bind_objects_to_variants
 from .eeg.sources import SimulatedSource, build_source
 from .gesture import GestureBridge
 from .store import HIGH_EFFORT_THRESHOLD, LOW_EFFORT_THRESHOLD, ProjectStore
@@ -106,6 +107,8 @@ async def _tick_loop() -> None:
             "variants": [v.to_dict() for v in store.variants],
             "source": {"kind": source.name, "status": source.status, "error": source.error},
             "gesture": {"status": gestures.status},
+            "desk": {"status": desk.status, "calibrated": desk.calibrated,
+                     "objects": len(desk.objects)},
         })
 
 
@@ -162,10 +165,36 @@ async def _on_vote(vote: str, payload: dict) -> None:
 gestures = GestureBridge(_on_vote)
 
 
+async def _on_desk_frame(payload: dict) -> None:
+    """Re-anchor the attention zones onto where the objects actually are.
+
+    The camera says where things sit on the desk; the headband says which one is
+    being attended to. Binding them here means the EEG resolves against real
+    physical placement instead of hardcoded positions, and moving an object
+    across the table moves its zone with it.
+    """
+    objects = payload.get("objects") or []
+    if objects:
+        attention.set_zones(bind_objects_to_variants(objects, store.variants))
+
+    await _broadcast({
+        "type": "desk",
+        "calibrated": payload.get("calibrated", False),
+        "objects": objects,
+        "width": payload.get("width"),
+        "height": payload.get("height"),
+        "jpeg": payload.get("jpeg"),
+    })
+
+
+desk = DeskBridge(_on_desk_frame)
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     source.start()
     gestures.start()
+    desk.start()
     app.state.tick = asyncio.create_task(_tick_loop())
 
 
@@ -177,6 +206,7 @@ async def _shutdown() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await task
     await gestures.stop()
+    await desk.stop()
     source.stop()
 
 
@@ -309,7 +339,13 @@ if WEB_DIR.exists():
 
     @app.get("/")
     def index() -> FileResponse:
+        """Control view — the operator's screen."""
         return FileResponse(WEB_DIR / "index.html")
+
+    @app.get("/desk")
+    def desk_view() -> FileResponse:
+        """Desk view — the second screen, camera plus overlay."""
+        return FileResponse(WEB_DIR / "desk.html")
 
 
 if __name__ == "__main__":
