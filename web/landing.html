@@ -221,6 +221,14 @@ footer{background:var(--ink); color:#B9B1C6; padding:8px 0 40px; font-size:14px}
 .foot-in{max-width:1120px; margin:0 auto; padding:26px 22px 0; text-align:center;
          border-top:1px solid rgba(255,255,255,.14)}
 footer a{color:#FFF3E4}
+
+.reel{margin:30px auto 0; max-width:860px}
+.reel video{
+  display:block; width:100%; border-radius:var(--r-lg);
+  border:3px solid rgba(255,243,228,.85); background:#000;
+  box-shadow:0 10px 0 rgba(0,0,0,.45);
+}
+.reel figcaption{margin-top:14px; font-size:14px; color:#9C93AE}
 </style>
 </head>
 <body class="tour-landing">
@@ -388,10 +396,13 @@ footer a{color:#FFF3E4}
     any of that — so <b>everything on this host is the simulator, honestly labelled</b>. A
     simulated effort score presented as a measured one would be the single dishonest thing in
     this project.</p>
-    <div class="slot" id="live-demo">
-      <div class="big">A recording of the hardware running goes here</div>
-      <p style="margin-top:8px">Video link to come.</p>
-    </div>
+    <!-- The recording. Not autoplaying and not muted-looping in the corner:
+         it is the evidence for everything the rest of the page claims, so it
+         gets played deliberately, with sound, at the size it was shot. -->
+    <figure class="reel" id="live-demo">
+      <video controls playsinline preload="metadata" src="/live-demo.mp4"></video>
+      <figcaption>The bench running on hardware — headband, camera, desk.</figcaption>
+    </figure>
   </div>
 </section>
 
