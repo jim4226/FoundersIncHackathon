@@ -42,6 +42,8 @@ TARGET_FPS = vision.TARGET_FPS
 
 Tracker = vision.Tracker
 detect = vision.detect
+Hands = vision.Hands
+resolve_touch = vision.resolve_touch
 
 clients, clients_lock = set(), threading.Lock()
 state = {"objects": [], "reference": None, "frame": None}
@@ -118,6 +120,8 @@ def main() -> None:
 
     threading.Thread(target=start_ws, daemon=True).start()
     tracker = Tracker()
+    hands = Hands()
+    print(f"[desk] hands: {'on' if hands.available else 'off — ' + hands.reason}")
 
     if args.synthetic:
         frames = synthetic_frames()
@@ -154,6 +158,8 @@ def main() -> None:
             print("[desk] reference captured automatically")
 
         objects = tracker.update(detect(frame, reference), FRAME_W) if reference is not None else []
+        found_hands = hands.detect(frame, int(time.time() * 1000))
+        resolve_touch(found_hands, objects, FRAME_W, FRAME_H)
 
         # Broadcast the CLEAN frame. Boxes and labels are the desk view's job --
         # it knows which variant each object is bound to and which one is being
@@ -168,6 +174,8 @@ def main() -> None:
                 "height": FRAME_H,
                 "origin": "camera",
                 "objects": vision.for_wire(objects),
+                "hands": found_hands,
+                "handsAvailable": hands.available,
                 "jpeg": base64.b64encode(buf).decode("ascii"),
             })
 
@@ -181,7 +189,12 @@ def main() -> None:
                 cv2.rectangle(display, (x, y), (x + w, y + h), (224, 200, 69), 2)
                 cv2.putText(display, obj["label"], (x, y - 9),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (224, 200, 69), 2)
-            banner = "press 'c' with an empty desk" if reference is None else f"{len(objects)} object(s)"
+            for hand in found_hands:
+                hx = int(hand["indexTip"][0] * FRAME_W)
+                hy = int(hand["indexTip"][1] * FRAME_H)
+                cv2.circle(display, (hx, hy), 9, (120, 255, 180), 2)
+            banner = ("press 'c' with an empty desk" if reference is None
+                      else f"{len(objects)} object(s), {len(found_hands)} hand(s)")
             cv2.putText(display, banner, (18, 38),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (224, 200, 69), 2)
             cv2.imshow("desk", display)

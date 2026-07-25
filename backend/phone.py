@@ -50,6 +50,10 @@ class PhoneCamera:
         self.frames = 0
         self.device: str | None = None
 
+        self.hands: list[dict] = []
+        self._hands = vision.Hands()
+        self.hands_available = self._hands.available
+
         self._tracker = vision.Tracker()
         self._reference: np.ndarray | None = None
         self._previous_gray: np.ndarray | None = None
@@ -74,6 +78,7 @@ class PhoneCamera:
         self.status = "idle"
         self.error = reason
         self.objects = []
+        self.hands = []
         self._previous_gray = None
 
     def calibrate(self) -> None:
@@ -122,6 +127,14 @@ class PhoneCamera:
         objects = (self._tracker.update(vision.detect(frame, self._reference), vision.FRAME_W)
                    if self._reference is not None else [])
 
+        # The same hand landmarks the overhead webcam runs. A phone propped over
+        # the desk sees the same hand reaching for the same object, so there is
+        # no reason for it to be the camera that cannot answer "which one am I
+        # touching" -- and every reason for the two to be indistinguishable.
+        found_hands = self._hands.detect(frame, int(now * 1000))
+        vision.resolve_touch(found_hands, objects, vision.FRAME_W, vision.FRAME_H)
+        self.hands = found_hands
+
         self.status = "streaming"
         self.last_frame_at = now
         self.frames += 1
@@ -136,6 +149,8 @@ class PhoneCamera:
             "width": vision.FRAME_W,
             "height": vision.FRAME_H,
             "objects": vision.for_wire(objects),
+            "hands": found_hands,
+            "handsAvailable": self._hands.available,
             "jpeg": jpeg_b64,
         })
 
@@ -145,6 +160,8 @@ class PhoneCamera:
             "live": self.live,
             "calibrated": self.calibrated,
             "objects": len(self.objects),
+            "hands": len(self.hands),
+            "handsAvailable": self._hands.available,
             "frames": self.frames,
             "device": self.device,
             "error": self.error,

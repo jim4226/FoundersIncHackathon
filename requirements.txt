@@ -17,5 +17,12 @@ opencv-python>=4.9
 # The pairing QR itself: pure python, no dependencies of its own.
 segno>=1.6
 
+# Optional: hand landmarks on whichever camera is watching the desk -- the
+# overhead webcam or a paired phone. Without it both still detect objects, they
+# just cannot report which one your hand is on. Also needs the model:
+#   curl -o desk/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+# On headless Linux: apt-get install libgles2 libegl1
+mediapipe>=0.10.21
+
 # Only needed for EEG_SOURCE=brainflow. Native BLE; dongles deprecated in 5.22.0.
 brainflow>=5.22.2

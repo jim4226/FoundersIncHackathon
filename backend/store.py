@@ -78,13 +78,19 @@ class Variant:
     position: float
     summary: str
     version: int = 1
-    status: str = "candidate"      # candidate | promoted | archived
+    status: str = "candidate"      # candidate | promoted | redesign | archived
     attention_seconds: float = 0.0
+    # Seconds a hand was actually on or reaching for this object, from the desk
+    # camera. Distinct from attention_seconds, which is where the eyes were.
+    # Looking at something and picking it up are different kinds of interest,
+    # and the record is more honest for keeping them apart.
+    interaction_seconds: float = 0.0
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["attention_seconds"] = round(self.attention_seconds, 1)
+        data["interaction_seconds"] = round(self.interaction_seconds, 1)
         return data
 
 
@@ -164,6 +170,12 @@ class ProjectStore:
             v = self.variant(variant_id)
             if v is not None:
                 v.attention_seconds += seconds
+
+    def add_interaction(self, variant_id: str, seconds: float) -> None:
+        with self._lock:
+            v = self.variant(variant_id)
+            if v is not None:
+                v.interaction_seconds += seconds
 
     def promote_variant(self, variant_id: str) -> Variant | None:
         with self._lock:
@@ -284,7 +296,8 @@ class ProjectStore:
         for v in self.variants:
             lines.append(
                 f"  - [{v.id}] {v.label} (v{v.version}, {v.status}): {v.summary}"
-                f" · attention {v.attention_seconds:.0f}s"
+                f" · looked at {v.attention_seconds:.0f}s"
+                f" · handled {v.interaction_seconds:.0f}s"
             )
             for note in v.notes:
                 lines.append(f"      note: {note}")

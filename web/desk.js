@@ -23,6 +23,8 @@ const hud = {
 };
 
 let objects = [];
+let hands = [];
+let handledVariant = null;
 let frameSize = { width: 960, height: 540 };
 let attention = null;
 let effort = null;
@@ -104,6 +106,70 @@ function draw() {
       }
     }
   });
+
+  drawHands(scaleX, scaleY);
+}
+
+// MediaPipe hand topology: 21 landmarks, five chains off the wrist.
+const HAND_BONES = [
+  [0,1],[1,2],[2,3],[3,4], [0,5],[5,6],[6,7],[7,8], [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16], [13,17],[0,17],[17,18],[18,19],[19,20],
+];
+const FINGERTIPS = new Set([4, 8, 12, 16, 20]);
+
+function drawHands(scaleX, scaleY) {
+  hands.forEach((hand) => {
+    const pts = hand.landmarks.map(([x, y]) => [x * frameSize.width * scaleX,
+                                                y * frameSize.height * scaleY]);
+    if (!pts.length) return;
+    // Green while on a design, neutral otherwise — so "this is the one in hand"
+    // reads without looking anywhere else on screen.
+    const live = !!hand.touching;
+    const colour = live ? '#45e0c0' : 'rgba(190,200,215,0.75)';
+
+    ctx.save();
+    ctx.shadowColor = colour;
+    ctx.shadowBlur = live ? 18 : 8;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = live ? 3.5 : 2.5;
+    ctx.lineCap = 'round';
+    HAND_BONES.forEach(([a, b]) => {
+      if (!pts[a] || !pts[b]) return;
+      ctx.beginPath();
+      ctx.moveTo(pts[a][0], pts[a][1]);
+      ctx.lineTo(pts[b][0], pts[b][1]);
+      ctx.stroke();
+    });
+    // White core over the glow, the trick that makes the skeleton read crisply.
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 1;
+    HAND_BONES.forEach(([a, b]) => {
+      if (!pts[a] || !pts[b]) return;
+      ctx.beginPath();
+      ctx.moveTo(pts[a][0], pts[a][1]);
+      ctx.lineTo(pts[b][0], pts[b][1]);
+      ctx.stroke();
+    });
+
+    pts.forEach(([x, y], i) => {
+      ctx.fillStyle = FINGERTIPS.has(i) ? colour : 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.arc(x, y, FINGERTIPS.has(i) ? 4 : 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Ring on the index fingertip: the landmark that decides the referent.
+    const tip = pts[8];
+    if (tip) {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(tip[0], tip[1], live ? 16 : 11, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  });
 }
 
 function roundRect(x, y, w, h, r) {
@@ -158,6 +224,8 @@ function connect() {
         waiting.style.display = 'none';
       }
       objects = msg.objects || [];
+      hands = msg.hands || [];
+      handledVariant = msg.handledVariant || null;
       if (msg.width) frameSize = { width: msg.width, height: msg.height };
       if (!msg.calibrated) {
         // The two cameras calibrate differently: the webcam has a preview
@@ -181,15 +249,19 @@ function connect() {
       const d = msg.desk;
       const deskLive = d?.status === 'connected' || d?.origin === 'phone';
       setStatus(hud.desk,
-        d ? `${d.status}${deskLive ? ` · ${d.objects} obj` : ''}` : 'idle',
+        d ? `${d.status}${deskLive
+              ? ` · ${d.objects} obj${d.handsAvailable ? ` · ${d.hands} hand` : ' · no hands'}`
+              : ''}` : 'idle',
         deskLive);
 
       if (feed.hidden === false) {
+        const held = handledVariant ? variants.find((v) => v.id === handledVariant) : null;
         const idx = focusedIndex();
-        const variant = idx >= 0 ? variants[idx] : null;
+        const variant = held || (idx >= 0 ? variants[idx] : null);
         banner.innerHTML = variant
-          ? `Holding on <span class="accent">${variant.label}</span> — thumbs-up to approve, double-blink to flag.`
-          : 'Look at a design on the desk.';
+          ? `${held ? 'Holding' : 'Looking at'} <span class="accent">${variant.label}</span>` +
+            ` — thumbs-up to approve, double-blink to flag.`
+          : 'Look at a design on the desk, or pick one up.';
       }
     }
 

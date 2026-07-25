@@ -215,6 +215,36 @@ The join is one number. The camera reports each object's normalised left-to-righ
 neither needs to know the other exists. Move an object across the table and its
 zone moves with it.
 
+### Hands
+
+The desk camera also runs MediaPipe hand landmarks, so the index fingertip
+answers *which of these am I touching* — a far more direct referent than
+inferring it from gaze. Reaching for a thing is unambiguous in a way that looking
+towards it is not, which leaves the headband only to say **how much it mattered**.
+
+Handling time is tracked separately from looking time. Picking something up and
+staring at it are different kinds of interest, and collapsing them would
+overstate both — so the record carries `looked at 42s · handled 11s` per design,
+and the agent reasons over both.
+
+This forced a fix worth knowing about: reaching for an object merges its blob
+into your arm, and the arm runs off the frame edge, so the border heuristic that
+correctly rejects arms was taking the object with it. A design vanished at the
+exact moment someone touched it. Tracked objects now survive ~2.5 s of occlusion,
+flagged rather than dropped.
+
+Hand tracking is **optional** — without `mediapipe` or the model file the desk
+still detects objects, it just can't report what the hand is on:
+
+```bash
+pip install mediapipe
+curl -o desk/hand_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+```
+
+> On headless Linux MediaPipe needs GL libraries: `apt-get install libgles2 libegl1`.
+> macOS needs nothing extra.
+
 ## Run it
 
 ```bash
@@ -340,8 +370,9 @@ backend/store.py           project, variants, effort-scored history
 backend/agent.py           the effort gate
 backend/server.py          WebSocket + REST
 gesture/                   MediaPipe thumbs up/down (teammate's module)
-desk/                      desk camera + object detection
-web/landing.html           the explainer, served at / on the hosted copy
+desk/                      desk camera: object detection + hand landmarks
+web/surface.html           Boxic Surface — the projected table, served at /
+web/landing.html           the explainer, at /about on the hosted copy
 web/demo.js                browser-side bench, for when nothing answers
 web/index.html             control view
 web/desk.html              desk view (second screen)
