@@ -145,10 +145,52 @@ diffuse → locked 15 s     |     re-engaged → unlocked 6 s
 
 ---
 
+## The hosted demo
+
+**<https://foundersinchacknight.netlify.app>** — the front end, live, with no
+hardware anywhere near it.
+
+Netlify cannot run the bench: it is a Python process on a laptop holding open
+WebSockets to a headband and two cameras. Deploying the UI alone would put a
+control view on the internet that hangs forever on a dead socket, which is worse
+than deploying nothing. So the pages carry one more event source.
+
+`web/demo.js` speaks the identical `tick` / `desk` / `vote` / `flag` stream the
+server speaks, and the pages consume it without knowing the difference — the
+same rule the backend was built on ("nothing downstream knows whether a
+headband, a phone, or the simulator produced them"), extended one hop further,
+into the browser. It engages **only when nothing answers**: the shim opens the
+real socket first and falls back after 1.4 s of silence, so running the bench
+locally keeps it entirely out of the way. Every page it drives is stamped
+`DEMO`, because a simulated effort score presented as a measured one would be
+the single dishonest thing in this project.
+
+| | |
+|---|---|
+| `?demo=1` | simulate without trying the real socket first |
+| `?live=1` | never simulate — fail exactly like production would |
+
+It is not a video: the stage controls, the arrow keys, the agent box and the
+promote flow all work against the simulator, and left alone it runs a loop that
+makes the argument twice — the same approve, at two different effort levels,
+landing differently.
+
+`netlify.toml` publishes `web/` with no build step. `/static/*` rewrites onto
+the same directory so one set of files works under both servers, and `/` serves
+the explainer rather than the operator console, because someone arriving from a
+link needs to know what they are looking at first.
+
+The one thing the hosted copy cannot do is pair a phone — frames have to reach a
+bench on your LAN. Scan the code there and the phone page opens, camera live,
+and says so.
+
+---
+
 ## Two screens
 
 | Screen | URL | Who looks at it |
 |---|---|---|
+| **Landing** | `/` (hosted) | Anyone arriving from a link. The explainer. Locally, `/` is the control view. |
 | **Desk** | `/desk` | The audience. Live camera of the table with the overlay drawn on top. |
 | **Control** | `/` | You. Effort breakdown, agent console, stage controls, the pairing QR. |
 | **Record** | `/project` | The payoff. What the session produced: decision log, designs, talk-to-your-project. |
@@ -299,6 +341,8 @@ backend/agent.py           the effort gate
 backend/server.py          WebSocket + REST
 gesture/                   MediaPipe thumbs up/down (teammate's module)
 desk/                      desk camera + object detection
+web/landing.html           the explainer, served at / on the hosted copy
+web/demo.js                browser-side bench, for when nothing answers
 web/index.html             control view
 web/desk.html              desk view (second screen)
 web/project.html           the record — decision log + talk to your project

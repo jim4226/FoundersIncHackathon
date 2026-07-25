@@ -184,6 +184,14 @@ async function loadPairing() {
     nodes.pairLink.href = info.url;
     nodes.pairUrl.textContent = info.url;
     nodes.pairWarn.classList.toggle('hidden', info.cameraAllowed);
+
+    // On the hosted demo there is no LAN address to advertise, so say what the
+    // code actually is rather than implying a bench is waiting behind it.
+    if (info.demo) {
+      nodes.pairWarn.classList.remove('hidden');
+      nodes.pairWarn.innerHTML = 'Demo code — it opens this site\'s phone page. '
+        + 'A running bench renders one for its own LAN address, and frames land on it.';
+    }
   } catch {
     nodes.pairUrl.textContent = 'pairing unavailable';
   }

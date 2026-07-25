@@ -72,7 +72,8 @@ function render(project) {
 /* ------------------------------------------------------------- transport */
 
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'project') render(msg.project);

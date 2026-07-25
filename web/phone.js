@@ -23,7 +23,7 @@ const MAX_BUFFERED = 512 * 1024;   // bytes in flight before we skip a frame
 const el = (id) => document.getElementById(id);
 const nodes = {
   dot: el('dot'), state: el('state'), stage: el('stage'), preview: el('preview'),
-  count: el('count'), controls: el('controls'), calibrate: el('calibrate'),
+  count: el('count'), controls: el('controls'), calibrate: el('calibrate'), hint: el('hint'),
   notice: el('notice'), noticeTitle: el('notice-title'),
   noticeBody: el('notice-body'), noticeUrl: el('notice-url'),
 };
@@ -35,6 +35,7 @@ canvas.height = FRAME_H;
 const ctx = canvas.getContext('2d', { alpha: false });
 
 let ws = null;
+let attempts = 0;
 let stream = null;
 let sending = false;
 let skipped = 0;
@@ -108,6 +109,7 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}/ws/phone?k=${encodeURIComponent(token)}`);
 
   ws.onopen = () => {
+    attempts = 0;
     status('streaming', 'on');
     ws.send(JSON.stringify({ type: 'hello', device: navigator.userAgent.slice(0, 120) }));
   };
@@ -131,7 +133,18 @@ function connect() {
 
   ws.onclose = () => {
     if (!nodes.notice.classList.contains('hidden')) return;
+    attempts += 1;
     status('reconnecting…', 'bad');
+    // Nothing is answering. The camera works -- that is visible above -- so the
+    // missing half is the bench, and saying so beats an endless "reconnecting"
+    // for someone who scanned a QR code off a slide rather than off a laptop.
+    if (attempts >= 3) {
+      nodes.count.textContent = 'not paired';
+      nodes.hint.innerHTML = '<b>No bench is answering on this network.</b> This page is '
+        + 'what the QR code opens — the camera is live, but the frames have nowhere to go. '
+        + 'Run <code>python -m backend.server --https</code> on your laptop and scan the '
+        + 'code on its control view.';
+    }
     setTimeout(connect, 1200);
   };
 }
