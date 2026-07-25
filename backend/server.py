@@ -105,6 +105,7 @@ async def _tick_loop() -> None:
             "attention": _state["attention"],
             "variants": [v.to_dict() for v in store.variants],
             "source": {"kind": source.name, "status": source.status, "error": source.error},
+            "gesture": {"status": gestures.status},
         })
 
 

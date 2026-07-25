@@ -223,8 +223,21 @@ python -m backend.server                 # :8000  bench
 python gesture/gesture_server.py         # :8765  votes
 ```
 
-The bridge reconnects on its own, so the gesture process can start and stop
-independently without taking the bench down.
+No webcam, or MediaPipe won't install (it has no wheel for Python 3.13/3.14)?
+`gesture/mock_votes.py` speaks the identical protocol on the identical port, so
+the bench cannot tell the difference:
+
+```bash
+python gesture/mock_votes.py             # interactive: a / r / q
+python gesture/mock_votes.py --script    # timed approve/reject loop
+```
+
+This is also the stage insurance. If the camera won't open two minutes before
+you present, run the mock and drive votes from the keyboard — votes still route
+through attention and the effort gate exactly as a real thumbs-up would.
+
+The bridge reconnects on its own, so either process can start and stop without
+taking the other down.
 
 ---
 

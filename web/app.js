@@ -9,7 +9,7 @@ const el = (id) => document.getElementById(id);
 const nodes = {
   effortValue: el('effort-value'), effortLabel: el('effort-label'), effortFill: el('effort-fill'),
   components: el('components'), blinkRate: el('blink-rate'), saccades: el('saccades'),
-  sourceKind: el('source-kind'), contact: el('contact'),
+  sourceKind: el('source-kind'), contact: el('contact'), gesture: el('gesture'),
   guardrail: el('guardrail'), guardrailText: el('guardrail-text'),
   variants: el('variants'), gazeMarker: el('gaze-marker'), tableCaption: el('table-caption'),
   flagToast: el('flag-toast'), history: el('history'),
@@ -93,7 +93,7 @@ function renderAttention(a, variants) {
   nodes.variants.innerHTML = (variants || []).map((v) => {
     const isFocused = v.id === focusedId && v.status !== 'archived';
     const dwell = isFocused ? Math.min(1, a.dwell / 1.2) : 0;
-    return `<div class="variant ${isFocused ? 'focused' : ''} ${v.status}" data-id="${v.id}">
+    return `<div class="variant ${isFocused ? 'focused' : ''} ${v.status} ${flashClass(v.id)}" data-id="${v.id}">
       <div class="variant-top">
         <h3>${v.label}</h3>
         <span class="variant-ver">v${v.version}</span>
@@ -140,6 +140,25 @@ function escapeHtml(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// The variant list is re-rendered at 8 Hz, so a class applied directly to the
+// node would be wiped on the next tick. Flashes live here and are re-applied
+// during render until they expire.
+const flashes = new Map();
+
+function flashVariant(variantId, vote, binding) {
+  flashes.set(variantId, {
+    cls: `vote-${vote}${binding ? '' : '-held'}`,
+    until: Date.now() + 1800,
+  });
+}
+
+function flashClass(variantId) {
+  const flash = flashes.get(variantId);
+  if (!flash) return '';
+  if (Date.now() > flash.until) { flashes.delete(variantId); return ''; }
+  return flash.cls;
+}
+
 let toastTimer;
 function toast(message) {
   nodes.flagToast.textContent = message;
@@ -163,6 +182,11 @@ function connect() {
       nodes.sourceKind.textContent = `${msg.source.kind} · ${msg.source.status}`;
       nodes.sourceKind.className = 'signal-value ' +
         (msg.source.status === 'streaming' ? 'ok' : msg.source.error ? 'bad' : '');
+
+      const g = msg.gesture?.status ?? 'idle';
+      nodes.gesture.textContent = g;
+      nodes.gesture.className = 'signal-value ' +
+        (g === 'connected' ? 'ok' : g.startsWith('disconnected') ? 'bad' : '');
     }
 
     if (msg.type === 'flag') {
@@ -183,6 +207,24 @@ function connect() {
     if (msg.type === 'promoted') {
       toast(`${msg.variant.label} promoted to main.`);
       latest.variants = msg.project.variants;
+    }
+
+    // The hero moment: a thumbs-up carries a verdict but not a subject. The
+    // attention estimate names the design, and the effort score decides whether
+    // the verdict is binding or merely noted.
+    if (msg.type === 'vote') {
+      const verb = msg.vote === 'approve' ? 'Approved' : 'Rejected';
+      const eff = msg.effort === null ? 'unmeasured' : Math.round(msg.effort);
+      flashVariant(msg.variant.id, msg.vote, msg.binding);
+      toast(msg.binding
+        ? `${verb} ${msg.variant.label} — effort ${eff}, ${msg.decisive ? 'merged' : 'staged for review'}.`
+        : `${verb} ${msg.variant.label} — but effort ${eff}. Held for review, not merged.`);
+      latest.variants = msg.project.variants;
+      (msg.project.contributions || []).slice(-1).forEach((c) => renderEntry(c, null));
+    }
+
+    if (msg.type === 'vote_unresolved') {
+      toast(`Vote ignored — ${msg.reason}.`);
     }
   };
 

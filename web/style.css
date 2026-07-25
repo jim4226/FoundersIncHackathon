@@ -194,6 +194,29 @@ main {
 .variant.promoted { border-color: var(--flag); }
 .variant.archived { opacity: 0.35; }
 
+/* Vote landing on the attended design. A binding vote lands hard; one cast
+   while the operator was diffuse gets a dashed, muted treatment so "recorded
+   but not merged" is legible at a glance from the back of the room. */
+.variant.vote-approve {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px var(--focus), 0 0 70px rgba(69,224,192,0.5);
+  animation: votePulse .5s ease;
+}
+.variant.vote-reject {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px var(--danger), 0 0 70px rgba(255,95,86,0.45);
+  animation: votePulse .5s ease;
+}
+.variant.vote-approve-held,
+.variant.vote-reject-held {
+  border-style: dashed;
+  border-color: var(--warn);
+  box-shadow: 0 0 0 1px var(--warn), 0 0 40px rgba(255,181,71,0.28);
+}
+@keyframes votePulse {
+  40% { transform: translateY(-5px) scale(1.035); }
+}
+
 .variant-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
 .variant h3 { font-size: 16px; font-weight: 600; }
 .variant-ver { font-family: var(--mono); font-size: 11px; color: var(--dim); }
