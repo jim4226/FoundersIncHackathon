@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bench — the project record</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+/* The record. This is the "GitHub for the physical world" surface: what the
+   bench session actually produced. The point it has to make visually is that
+   every entry is stamped with the state of the person who made it -- that is
+   the column a software repo does not have. */
+body { overflow-y: auto; display: block; }
+
+.repo { max-width: 1180px; margin: 0 auto; padding: 30px 26px 70px; }
+
+.repo-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 30px; margin-bottom: 26px; }
+.repo-title h1 { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
+.repo-title p { color: var(--muted); font-size: 14px; max-width: 620px; }
+.repo-stats { display: flex; gap: 26px; flex-shrink: 0; }
+.rs { text-align: right; }
+.rs-num { font-family: var(--mono); font-size: 25px; font-weight: 300; display: block; }
+.rs-cap { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+
+.cols { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 26px; align-items: start; }
+@media (max-width: 980px) { .cols { grid-template-columns: 1fr; } }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+.card h2 {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--dim); font-weight: 600; margin-bottom: 14px;
+}
+
+/* ---- versions ---- */
+.ver { display: flex; gap: 13px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.ver:last-child { border-bottom: none; }
+.ver-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: var(--dim); }
+.ver.approved .ver-dot { background: var(--focus); box-shadow: 0 0 10px var(--focus); }
+.ver.changes_requested .ver-dot { background: var(--warn); }
+.ver.archived .ver-dot { background: var(--danger); opacity: .5; }
+.ver-body { flex: 1; min-width: 0; }
+.ver-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.ver-name { font-weight: 600; font-size: 14.5px; }
+.ver-meta { font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+.ver-sum { color: var(--muted); font-size: 12.5px; margin: 4px 0 8px; }
+.attn-bar { height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; }
+.attn-fill { height: 100%; background: linear-gradient(90deg, var(--focus-dim), var(--focus)); }
+.attn-cap { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 5px; display: block; }
+
+/* ---- commit log ---- */
+.commit { display: grid; grid-template-columns: 62px minmax(0,1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.commit:last-child { border-bottom: none; }
+.commit-effort { text-align: center; }
+.ce-num { font-family: var(--mono); font-size: 21px; font-weight: 300; display: block; line-height: 1.1; }
+.ce-cap { font-size: 9px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); }
+.ce-focused .ce-num { color: var(--focus); }
+.ce-diffuse .ce-num { color: var(--warn); }
+.ce-flagged .ce-num { color: var(--flag); }
+.ce-unknown .ce-num { color: var(--dim); }
+.commit-body p { font-size: 13.5px; line-height: 1.5; }
+.commit-meta { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); margin-bottom: 5px; }
+.commit-agent {
+  margin-top: 9px; padding: 9px 11px; background: var(--panel-2); border-radius: 7px;
+  font-size: 12px; color: var(--muted); line-height: 1.5; white-space: pre-wrap;
+}
+.tag {
+  display: inline-block; font-size: 9px; font-weight: 600; letter-spacing: 0.07em;
+  text-transform: uppercase; padding: 2px 6px; border-radius: 4px; margin-left: 7px;
+}
+.tag.merged { background: rgba(69,224,192,0.16); color: var(--focus); }
+.tag.challenged { background: rgba(255,181,71,0.16); color: var(--warn); }
+.tag.proposed { background: var(--panel-2); color: var(--dim); }
+
+/* ---- talk to your project ---- */
+.ask textarea {
+  width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+  padding: 11px; color: var(--text); font-family: inherit; font-size: 13px; resize: vertical;
+}
+.ask textarea:focus { outline: none; border-color: var(--focus); }
+.ask button {
+  width: 100%; margin-top: 9px; padding: 10px; border-radius: 8px; cursor: pointer;
+  background: var(--focus); border: none; color: #05201b; font-weight: 600;
+  font-size: 13px; font-family: inherit;
+}
+.ask button:disabled { opacity: .45; cursor: default; }
+.answer {
+  margin-top: 14px; padding: 13px; background: var(--panel-2); border-radius: 9px;
+  border-left: 2px solid var(--focus); font-size: 13px; line-height: 1.6; white-space: pre-wrap;
+}
+.ask-note { font-size: 11px; color: var(--dim); margin-top: 9px; line-height: 1.5; }
+
+.file { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.file:last-child { border-bottom: none; }
+.file-name { font-family: var(--mono); font-size: 11.5px; }
+.file-kind { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); flex-shrink: 0; }
+
+.nav { display: flex; gap: 16px; margin-bottom: 22px; font-size: 12.5px; }
+.nav a { color: var(--muted); text-decoration: none; }
+.nav a:hover { color: var(--focus); }
+.nav a.here { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="repo">
+
+  <div class="nav">
+    <a href="/">Control</a><a href="/desk">Desk</a><a href="/project" class="here">Record</a>
+  </div>
+
+  <div class="repo-head">
+    <div class="repo-title">
+      <h1 id="p-name">—</h1>
+      <p id="p-desc"></p>
+    </div>
+    <div class="repo-stats">
+      <div class="rs"><span class="rs-num" id="s-decisions">0</span><span class="rs-cap">decisions</span></div>
+      <div class="rs"><span class="rs-num" id="s-effort">—</span><span class="rs-cap">avg effort</span></div>
+      <div class="rs"><span class="rs-num" id="s-challenged">0</span><span class="rs-cap">challenged</span></div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h2>Decision log — every entry stamped with the state of whoever made it</h2>
+        <div id="commits"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card ask">
+        <h2>Talk to your project</h2>
+        <textarea id="ask-input" rows="3" placeholder="Walk me through the project so far…"></textarea>
+        <button id="ask-send">Ask</button>
+        <div id="answer" hidden></div>
+        <p class="ask-note">Reading is never gated on effort and never recorded as a
+        change — logging every question as a decision would corrupt the record.</p>
+      </div>
+
+      <div class="card">
+        <h2>Designs</h2>
+        <div id="versions"></div>
+      </div>
+
+      <div class="card">
+        <h2>Artifacts</h2>
+        <div id="files"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script src="/static/project.js"></script>
+</body>
+</html>

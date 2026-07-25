@@ -83,6 +83,20 @@ def contribution_to_decision(contribution, version_id: str | None = None) -> dic
     }
 
 
+# Bench's variant lifecycle onto Boxic's VersionStatus. Boxic's enum is
+# working | in_review | changes_requested | approved | released | superseded |
+# archived -- there is no "draft", so anything outside this map would be an
+# invalid status on import. `redesign` lands on `changes_requested`, which is
+# exactly what a considered thumbs-down means.
+VERSION_STATUS = {
+    "promoted": "approved",
+    "archived": "archived",
+    "redesign": "changes_requested",
+    "candidate": "working",
+}
+DEFAULT_VERSION_STATUS = "working"
+
+
 def variant_to_version(variant, number: int) -> dict:
     """Map a design variant on the table onto a Boxic Version.
 
@@ -99,7 +113,7 @@ def variant_to_version(variant, number: int) -> dict:
         "sourceFileName": f"{variant.label.lower().replace(' ', '_')}.step",
         "sourceMimeType": "model/step",
         "portrait": None,
-        "status": "approved" if variant.status == "promoted" else "draft",
+        "status": VERSION_STATUS.get(variant.status, DEFAULT_VERSION_STATUS),
         "reviews": [],
         "attentionSeconds": round(variant.attention_seconds, 1),
         "benchStatus": variant.status,
@@ -117,7 +131,9 @@ def export_document(store: ProjectStore) -> dict:
         "description": store.description,
         "versions": [variant_to_version(v, i + 1) for i, v in enumerate(store.variants)],
         "decisions": [
-            contribution_to_decision(c, version_id=f"ver_{c.artifact_id}" if c.artifact_id else None)
+            contribution_to_decision(
+                c, version_id=f"ver_{c.variant_id}" if c.variant_id else None
+            )
             for c in store.contributions
         ],
         "files": [
