@@ -151,19 +151,23 @@
 
   /* ------------------------------------------------------------- materials */
 
+  /* Materials stay physical -- a soldermask is green because the board is
+     green. It is the *projected* layer (glow, silhouette, callouts) that
+     carries the Boxic palette, which is the same division the surface makes
+     between an object on the table and the light cast onto it. */
   const MAT = {
-    shellDark:  { c: [58, 66, 82],   spec: 0.30 },
-    shellLight: { c: [92, 103, 124], spec: 0.22 },
-    rubber:     { c: [30, 34, 43],   spec: 0.08 },
-    glass:      { c: [14, 30, 34],   spec: 0.45, emit: [8, 44, 40] },
-    lens:       { c: [20, 26, 34],   spec: 0.55, emit: [6, 28, 27] },
-    metal:      { c: [150, 158, 172], spec: 0.75 },
-    accent:     { c: [46, 150, 130], spec: 0.50, emit: [10, 34, 30] },
-    pcb:        { c: [22, 82, 70],   spec: 0.25 },
-    pcbEdge:    { c: [16, 60, 52],   spec: 0.20 },
-    gold:       { c: [201, 162, 39], spec: 0.80 },
-    ic:         { c: [26, 28, 33],   spec: 0.35 },
-    passive:    { c: [70, 62, 58],   spec: 0.30 },
+    shellDark:  { c: [54, 62, 72],   spec: 0.30 },
+    shellLight: { c: [92, 104, 118], spec: 0.22 },
+    rubber:     { c: [26, 30, 35],   spec: 0.08 },
+    glass:      { c: [14, 26, 32],   spec: 0.45, emit: [10, 38, 48] },
+    lens:       { c: [20, 25, 31],   spec: 0.55, emit: [7, 24, 31] },
+    metal:      { c: [152, 160, 170], spec: 0.75 },
+    accent:     { c: [120, 150, 164], spec: 0.50, emit: [16, 30, 36] },
+    pcb:        { c: [28, 78, 66],   spec: 0.25 },
+    pcbEdge:    { c: [20, 58, 50],   spec: 0.20 },
+    gold:       { c: [196, 150, 48], spec: 0.80 },
+    ic:         { c: [25, 27, 31],   spec: 0.35 },
+    passive:    { c: [72, 66, 60],   spec: 0.30 },
   };
 
   /* ---------------------------------------------------------------- models */
@@ -391,7 +395,7 @@
 
   /* ---------------------------------------------------------------- render */
 
-  const DEFAULT_GLOW = [69, 224, 192];
+  const DEFAULT_GLOW = [169, 199, 214];   // --blue, the primary projection colour
 
   function hexToRgb(hex) {
     if (Array.isArray(hex)) return hex;
@@ -569,7 +573,7 @@
   function drawAnnotations(ctx, model, place, glow) {
     const stroke = `rgba(${glow[0]},${glow[1]},${glow[2]},0.62)`;
     ctx.save();
-    ctx.font = '500 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.font = "500 10px 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
     ctx.textBaseline = 'middle';
     ctx.lineWidth = 1;
 
@@ -614,9 +618,9 @@
   function label(ctx, text, x, y, glow, centred) {
     const w = ctx.measureText(text).width;
     const lx = centred ? x - w / 2 : (ctx.textAlign === 'right' ? x - w : x);
-    ctx.fillStyle = 'rgba(8,9,12,0.78)';
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
     ctx.fillRect(lx - 5, y - 9, w + 10, 18);
-    ctx.strokeStyle = `rgba(${glow[0]},${glow[1]},${glow[2]},0.28)`;
+    ctx.strokeStyle = `rgba(${glow[0]},${glow[1]},${glow[2]},0.30)`;
     ctx.lineWidth = 1;
     ctx.strokeRect(lx - 5, y - 9, w + 10, 18);
     ctx.fillStyle = `rgb(${glow[0]},${glow[1]},${glow[2]})`;

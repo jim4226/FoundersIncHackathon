@@ -47,9 +47,12 @@ function renderEffort(e) {
     ? `calibrating ${Math.round((e.calibrationProgress || 0) * 100)}%`
     : labelFor(v);
   nodes.effortFill.style.width = `${calibrating ? 0 : v}%`;
-  nodes.effortFill.style.background = v < LOW
-    ? 'linear-gradient(90deg,#8a5a1e,var(--warn))'
-    : 'linear-gradient(90deg,var(--focus-dim),var(--focus))';
+  // Below the guardrail the meter turns yellow, matching the rule the
+  // projector draws across the surface. Tokens, so the palette lives in CSS.
+  nodes.effortFill.style.background = v < LOW ? 'var(--yellow)' : 'var(--blue)';
+  nodes.effortFill.style.boxShadow = v < LOW
+    ? '0 0 12px rgba(244,181,42,0.55)'
+    : '0 0 12px rgba(169,199,214,0.5)';
 
   nodes.blinkRate.textContent = e.blinkRate?.toFixed(1) ?? '--';
 

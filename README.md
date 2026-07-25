@@ -55,6 +55,46 @@ software repo has ever had.
 
 ---
 
+## The look: Boxic Surface
+
+The front end is built in the **Boxic Surface** visual language, because the
+bench *is* the Boxic surface — the desk half of the same product, and the place
+its project record gets written from.
+
+The governing idea is that the interface is **projected light on a table**.
+Black is not a background colour, it is the absence of projection, so everything
+visible is light the projector is actually casting. That has consequences that
+look like mistakes if you don't know the rule:
+
+- **No filled cards, and no rounded corners.** Structure is carried by
+  hairlines, rules and corner tracking marks. A design on the table is a
+  *detection* — a rule down its left edge and a label beside it — and the one
+  you are attending to gets projected corner brackets, not a highlight.
+- **Section headings are a label plus a rule** running to the edge of the
+  column, which is the single most characteristic device in the system.
+- **Type does the work.** Funnel Display, heavily tracked and uppercase, for
+  names; JetBrains Mono for everything else, including body text.
+
+| Token | | Used for |
+|---|---|---|
+| `--blue` | `#A9C7D6` | primary projection — measurement, focus, dwell, the part in your hand |
+| `--red` | `#FF7454` | attention and human decision — gaze marker, flags, the selected part |
+| `--yellow` | `#F4B52A` | held or guarded — the effort guardrail, votes cast while diffuse |
+| `--ok` | `#8FBF9F` | merged, promoted, connected |
+| `--cream` | `#F2EDE4` | type, on black |
+
+Both typefaces are **inlined as base64** in `web/fonts.css` rather than linked
+from Google Fonts. A linked font CDN fails silently to Arial, which is the
+failure you notice last — and it fails exactly when the venue wifi does. 65 KB
+buys a front end with no network dependency at all.
+
+The CAD renderer follows the same split the surface makes between an object and
+the light cast on it: **materials stay physical** — a soldermask is green
+because the board is green — while the *projected* layer (glow, silhouette,
+dimension callouts) carries the palette above.
+
+---
+
 ## Hold it — the part in your hand, at 1:1
 
 `http://localhost:8000/hold`
@@ -321,6 +361,9 @@ That decoupling is the point: the two halves of the team build in parallel, and
 a dead headband degrades the demo instead of ending it.
 
 ```
+web/style.css              Boxic Surface tokens + the table view
+web/hold.css               the camera view
+web/fonts.css              Funnel Display + JetBrains Mono, inlined
 backend/eeg/metrics.py     effort score, blink + clench detection
 backend/eeg/attention.py   calibration-free left/right attention
 backend/eeg/sources.py     Mind Monitor / BrainFlow / simulator

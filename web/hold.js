@@ -78,7 +78,7 @@ const state = {
   mode: 'starting',        // starting | tracking | searching | simulated
   detail: '',
   energy: 0.62,            // drives the glow; bench effort overrides it
-  glow: '#45e0c0',
+  glow: '#A9C7D6',
   benchLabel: null,
   fps: 0,
 };
@@ -135,7 +135,7 @@ async function startCamera(deviceId) {
     if (!deviceId) throw err;
     const stream = await navigator.mediaDevices.getUserMedia({ video: size, audio: false });
     video.srcObject = stream;
-    flash('That camera is unavailable — using the default.', '#ffb547');
+    flash('That camera is unavailable — using the default.', '#F4B52A');
   }
   await video.play();
 
@@ -340,13 +340,13 @@ function paintVideo(w, h) {
 
 function drawVideo(w, h) {
   if (!video.videoWidth) {
-    ctx.fillStyle = '#08090c';
+    ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, w, h);
     return;
   }
   paintVideo(w, h);
   // Knock the room back so the projected part reads as the brightest thing.
-  ctx.fillStyle = 'rgba(8,9,12,0.42)';
+  ctx.fillStyle = 'rgba(0,0,0,0.46)';
   ctx.fillRect(0, 0, w, h);
 }
 
@@ -365,20 +365,20 @@ function drawHand(pts, bones, alpha, mm, s) {
     ctx.lineTo(pts[b][0], pts[b][1]);
   }
   if (mm) {
-    ctx.strokeStyle = 'rgba(20,58,54,0.80)';
+    ctx.strokeStyle = 'rgba(30,44,52,0.82)';
     ctx.lineWidth = mm * s;
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(69,224,192,0.30)';
+    ctx.strokeStyle = 'rgba(169,199,214,0.28)';
     ctx.lineWidth = mm * s * 0.86;
     ctx.stroke();
   }
-  ctx.strokeStyle = 'rgba(120,244,220,0.50)';
-  ctx.shadowColor = 'rgba(69,224,192,0.55)';
+  ctx.strokeStyle = 'rgba(200,224,236,0.55)';
+  ctx.shadowColor = 'rgba(169,199,214,0.55)';
   ctx.shadowBlur = 8;
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(232,236,244,0.5)';
+  ctx.fillStyle = 'rgba(242,237,228,0.5)';
   for (const [, b] of bones) {
     ctx.beginPath();
     ctx.arc(pts[b][0], pts[b][1], 2.4, 0, Math.PI * 2);
@@ -425,7 +425,7 @@ function occludeWithFingers(pts, w, h, span) {
 function drawReticle(f, alpha) {
   ctx.save();
   ctx.globalAlpha = alpha * 0.5;
-  ctx.strokeStyle = 'rgba(69,224,192,0.5)';
+  ctx.strokeStyle = 'rgba(169,199,214,0.5)';
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 5]);
   ctx.beginPath();
@@ -614,7 +614,7 @@ function connectBench() {
       const effort = msg.effort && msg.effort.effort;
       if (typeof effort === 'number') {
         state.energy = Math.max(0.15, Math.min(1, effort / 100));
-        state.glow = effort < 35 ? '#ffb547' : '#45e0c0';
+        state.glow = effort < 35 ? '#F4B52A' : '#A9C7D6';
         el('effort').textContent = `${Math.round(effort)}`;
       }
       const att = msg.attention || {};
@@ -629,7 +629,7 @@ function connectBench() {
     }
     if (msg.type === 'vote') {
       flash(`${msg.vote === 'approve' ? 'APPROVED' : 'REJECTED'} · ${msg.variant.label}` +
-        (msg.binding ? '' : ' · held, you were diffuse'), msg.vote === 'approve' ? '#45e0c0' : '#ff5f56');
+        (msg.binding ? '' : ' · held, you were diffuse'), msg.vote === 'approve' ? '#8FBF9F' : '#FF7454');
     }
   };
 }
@@ -667,7 +667,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 function showSpan() {
-  flash(`knuckle span ${state.spanMm} mm — scale calibration`, '#45e0c0');
+  flash(`knuckle span ${state.spanMm} mm — scale calibration`, '#A9C7D6');
 }
 
 function setMirror(on) {

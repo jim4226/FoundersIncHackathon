@@ -21,7 +21,7 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -312,7 +312,7 @@ if WEB_DIR.exists():
         return FileResponse(WEB_DIR / "index.html")
 
     @app.get("/hold")
-    def hold() -> RedirectResponse:
+    def hold(request: Request) -> RedirectResponse:
         """The CAD-in-hand view. Needs a camera, so it lives on its own page --
         and it is the same WebSocket stream underneath, which is why the part in
         your hand can be the part the bench says you are attending to.
@@ -321,8 +321,13 @@ if WEB_DIR.exists():
         relatively. That is what lets the identical file be served straight out
         of web/ by any static file server, which is how you run it on a laptop
         with no Python at all -- see 'Run it on your own laptop' in the README.
+
+        The query string has to be carried across: ?sim=1 and ?cam=<id> are how
+        the view is driven on stage, and a redirect that drops them silently
+        ignores both.
         """
-        return RedirectResponse("/static/hold.html")
+        query = request.url.query
+        return RedirectResponse(f"/static/hold.html{'?' + query if query else ''}")
 
 
 if __name__ == "__main__":
