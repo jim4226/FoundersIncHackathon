@@ -120,6 +120,74 @@ footer a { color: var(--muted); }
 .door-live:hover { border-color: var(--warn); }
 .door-live .door-tag { color: var(--warn); }
 .door-go.door-pending { color: var(--dim); }
+
+/* ---------------------------------------------------------------- the ask.
+   Someone landing here should not have to work out where the demo is. One
+   button, loud, above the fold, and a copy of it pinned in the header. */
+
+.lede { font-size: 18px; line-height: 1.6; color: var(--muted); max-width: 60ch; }
+
+.launch { margin: 32px 0 8px; }
+
+.big-btn {
+  display: flex; align-items: center; gap: 18px;
+  padding: 22px 26px; border-radius: 16px; text-decoration: none;
+  background: linear-gradient(120deg, #45e0c0, #35c7ad);
+  color: #07120f; border: 1px solid #6ff0d6;
+  box-shadow: 0 0 0 1px rgba(69,224,192,0.35), 0 14px 60px rgba(69,224,192,0.28);
+  max-width: 640px;
+  transition: transform .18s var(--ease, ease), box-shadow .18s ease;
+  animation: breathe 3.4s ease-in-out infinite;
+}
+.big-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 1px rgba(69,224,192,0.5), 0 18px 74px rgba(69,224,192,0.42);
+}
+.big-btn:active { transform: translateY(0); }
+@keyframes breathe {
+  50% { box-shadow: 0 0 0 1px rgba(69,224,192,0.45), 0 16px 70px rgba(69,224,192,0.42); }
+}
+@media (prefers-reduced-motion: reduce) { .big-btn { animation: none; } }
+
+.big-btn-play {
+  flex: none; width: 44px; height: 44px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 15px;
+  background: rgba(7,18,15,0.16); color: #07120f;
+}
+.big-btn-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.big-btn-text b { font-size: 23px; font-weight: 700; letter-spacing: -0.02em; }
+.big-btn-text i { font-style: normal; font-size: 13px; opacity: 0.78; }
+.big-btn-go { margin-left: auto; font-size: 24px; font-weight: 700; }
+
+.launch-sub {
+  margin-top: 14px; font-size: 13px; color: var(--muted);
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.launch-sub a { color: var(--warn); }
+.pill {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em;
+  text-transform: uppercase; padding: 4px 9px; border-radius: 999px;
+}
+.pill-sim { color: var(--focus); border: 1px solid var(--focus-dim); background: rgba(69,224,192,0.08); }
+
+.bar-btn {
+  display: inline-flex; align-items: center; padding: 9px 15px; border-radius: 9px;
+  background: var(--focus); color: #07120f; text-decoration: none;
+  font-size: 13px; font-weight: 700; white-space: nowrap;
+  box-shadow: 0 0 22px rgba(69,224,192,0.3);
+}
+.bar-btn:hover { background: #6ff0d6; }
+.bar-right { align-items: center; }
+
+.doors-one { grid-template-columns: 1fr; max-width: 640px; }
+@media (max-width: 620px) {
+  .big-btn { gap: 13px; padding: 18px; }
+  .big-btn-text b { font-size: 19px; }
+  .bar-btn { padding: 7px 11px; font-size: 12px; }
+}
+
+.note-live { margin-top: 26px; border-left-color: var(--warn); background: rgba(255,181,71,0.06); max-width: 66ch; }
+.note-live b { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -135,6 +203,7 @@ footer a { color: var(--muted); }
       <span class="signal-label">this page</span>
       <span class="signal-value ok">simulated bench</span>
     </div>
+    <a class="bar-btn" href="/surface">Open the demo →</a>
   </div>
 </header>
 
@@ -143,42 +212,42 @@ footer a { color: var(--muted); }
   <div class="hero">
     <div class="eyebrow">Founders Inc hackathon</div>
     <h1>The workbench knows what you're <em>looking at</em>, and how hard you're thinking.</h1>
-    <p>Physical products get built in a mess. CAD lives in two different packages, the STEP
-    files are on someone's desktop, the feedback is in email, and two weeks later nobody
-    remembers why the wall thickness changed. Software solved this with git and then handed
-    it to agents. Hardware never got either.</p>
-    <p>Bench is the missing input layer. A camera watches the desk and draws on it. An EEG
-    headband watches the person. Together they turn what happens at a physical workbench
-    into a project history an agent can actually reason over.</p>
+    <p class="lede">A camera watches the desk and draws on it. An EEG headband watches the
+    person. Together they turn what happens at a physical workbench into a project history
+    an agent can actually reason over.</p>
+
+    <!-- The whole page has one job above the fold: get someone into the demo.
+         Anything that competes with that button is in the way of it. -->
+    <div class="launch">
+      <a class="big-btn" href="/surface">
+        <span class="big-btn-play" aria-hidden="true">▶</span>
+        <span class="big-btn-text">
+          <b>Open the demo</b>
+          <i>Boxic Surface — the projected table, running the whole sequence</i>
+        </span>
+        <span class="big-btn-go" aria-hidden="true">→</span>
+      </a>
+      <p class="launch-sub">
+        <span class="pill pill-sim">simulated bench</span>
+        no hardware, no install — it runs in this browser, right now.
+        <a href="#live-demo">Want the hardware running for real?</a>
+      </p>
+    </div>
 
     <!-- Two doors, and they are not the same thing. One you can open right now;
          the other needs a headband and two cameras on a desk, so it is a
          recording. Saying which is which is the whole point -- a simulated
          effort score presented as a measured one would be the single dishonest
          thing in this project. -->
-    <div class="doors">
+    <!-- Not a door: there is nothing behind it to open. A recording is the
+         honest form of "live demo" on a host that cannot hold a WebSocket to a
+         headband. -->
+    <p class="note note-live" id="live-demo"><b>About the live one.</b> The bench itself is
+    hardware — a Muse headband reading effort and attention, an overhead camera or a paired
+    phone watching the desk, and a laptop holding it together over WebSockets. A website
+    cannot run any of that, so everything on this host is the simulator, honestly labelled.
+    <b>A recording of the hardware running goes here</b> — video link to come.</p>
 
-      <a class="door door-sim" href="/surface">
-        <span class="door-tag">simulated · open it now</span>
-        <span class="door-name">Boxic Surface</span>
-        <p>The projected table, running the full sequence: surface mapping, object
-        detection, six live files from the Portable Espresso Maker, a physical object
-        linked into the project record, a shared 3D review, a spatial comment, and the
-        project answering a question about itself.</p>
-        <span class="door-go">Open the demo →</span>
-      </a>
-
-      <a class="door door-live" id="live-demo" href="#live-demo">
-        <span class="door-tag">live · on hardware</span>
-        <span class="door-name">The bench itself</span>
-        <p>A Muse headband, an overhead camera and a phone over a real desk. None of
-        that can run on a static host — the live loop is a Python process holding
-        WebSockets open to hardware — so the honest version of "live demo" here is a
-        recording of it running.</p>
-        <span class="door-go door-pending">Video link to come →</span>
-      </a>
-
-    </div>
 
     <div class="cta">
       <a href="/control">Control view <span>simulated</span></a>
