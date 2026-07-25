@@ -193,6 +193,13 @@ main {
 }
 .variant.promoted { border-color: var(--flag); }
 .variant.archived { opacity: 0.35; }
+/* Sent back to the drawing board: a dashed "blueprint" treatment so a rejected
+   design reads as in-rework at a glance from the back of the room. */
+.variant.redesign {
+  border-style: dashed;
+  border-color: var(--warn);
+  background: linear-gradient(180deg, rgba(255,181,71,0.07), var(--panel));
+}
 
 /* Vote landing on the attended design. A binding vote lands hard; one cast
    while the operator was diffuse gets a dashed, muted treatment so "recorded
@@ -233,6 +240,7 @@ main {
 }
 .badge.promoted { background: rgba(167,139,250,0.18); color: var(--flag); }
 .badge.candidate { background: var(--panel-2); color: var(--dim); }
+.badge.redesign { background: rgba(255,181,71,0.18); color: var(--warn); }
 
 .flag-toast {
   min-height: 34px; display: flex; align-items: center; justify-content: center;

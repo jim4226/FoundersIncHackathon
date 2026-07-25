@@ -116,9 +116,10 @@ async def _on_vote(vote: str, payload: dict) -> None:
     """Route a thumbs-up/down onto whatever the operator is currently attending to.
 
     The gesture supplies the verdict, the attention estimate supplies the
-    referent, and the effort score decides whether the verdict binds. An approve
-    while focused promotes the design; the same approve while diffuse is
-    recorded and held for review, because nodding along is not deciding.
+    referent, and the effort score decides whether the verdict binds. A
+    considered approve promotes the design; a considered reject sends it back to
+    the drawing board. The same vote cast while diffuse is recorded and held for
+    review either way, because nodding (or shaking) along is not deciding.
     """
     att = _state.get("attention") or {}
     effort = (_state.get("effort") or {}).get("effort")
@@ -135,11 +136,23 @@ async def _on_vote(vote: str, payload: dict) -> None:
     binding = effort is not None and effort >= LOW_EFFORT_THRESHOLD
     decisive = effort is not None and effort >= HIGH_EFFORT_THRESHOLD
 
+    # Only a considered vote moves the design through its lifecycle. Approve ->
+    # promoted, reject -> back to design. A diffuse vote is recorded but inert.
+    promoted = reverted = None
+    if decisive and vote == "approve":
+        promoted = store.promote_variant(variant.id)
+        attention.set_zones(store.zones())
+    elif decisive and vote == "reject":
+        reverted = store.revert_variant(variant.id)
+        attention.set_zones(store.zones())
+
     verb = "Approved" if vote == "approve" else "Rejected"
     body = (
         f"{verb} {variant.label} by gesture while attending to it"
         f" ({payload.get('confidence', 0):.0%} gesture confidence)."
     )
+    if reverted:
+        body += " Sent back to design — back to the drawing board."
     if not binding:
         body += " Operator was diffuse — held for review rather than merged."
 
@@ -149,15 +162,11 @@ async def _on_vote(vote: str, payload: dict) -> None:
         status="merged" if binding else "challenged",
     )
 
-    promoted = None
-    if vote == "approve" and decisive:
-        promoted = store.promote_variant(variant.id)
-        attention.set_zones(store.zones())
-
     await _broadcast({
         "type": "vote", "vote": vote, "variant": variant.to_dict(),
         "effort": effort, "binding": binding, "decisive": decisive,
         "promoted": promoted.to_dict() if promoted else None,
+        "reverted": reverted.to_dict() if reverted else None,
         "project": store.to_dict(),
     })
 

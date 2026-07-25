@@ -172,6 +172,22 @@ class ProjectStore:
             target.version += 1
             return target
 
+    def revert_variant(self, variant_id: str) -> Variant | None:
+        """Send a design back to the drawing board — one step back in its
+        lifecycle (design -> candidate -> promoted). A considered thumbs-down
+        pulls the design out of review and marks it for rework, undoing the last
+        version bump so the record shows it regressed rather than advanced.
+        """
+        with self._lock:
+            target = self.variant(variant_id)
+            if target is None:
+                return None
+            target.status = "redesign"
+            if target.version > 1:
+                target.version -= 1
+            target.notes.append("Rejected while focused — sent back to design.")
+            return target
+
     # ----------------------------------------------------------- mutation
 
     def add_contribution(
