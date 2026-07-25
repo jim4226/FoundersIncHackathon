@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bench — the workbench that knows what you're looking at</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>Bench</h1>
+    <span class="sub">Thermal Camera Rev C</span>
+  </div>
+  <div class="bar-right">
+    <div class="signal" id="signal">
+      <span class="signal-label">source</span>
+      <span class="signal-value" id="source-kind">—</span>
+    </div>
+    <div class="signal" id="contact-wrap">
+      <span class="signal-label">contact</span>
+      <span class="signal-value" id="contact">—</span>
+    </div>
+  </div>
+</header>
+
+<div id="guardrail" class="guardrail hidden">
+  <strong>Guardrail engaged.</strong>
+  <span id="guardrail-text">Effort below threshold — destructive operations are locked.</span>
+</div>
+
+<main>
+
+  <!-- LEFT: what the headband is measuring -->
+  <aside class="panel panel-left">
+    <h2>Operator state</h2>
+
+    <div class="effort">
+      <div class="effort-value" id="effort-value">--</div>
+      <div class="effort-label" id="effort-label">calibrating</div>
+      <div class="effort-track"><div class="effort-fill" id="effort-fill"></div>
+        <div class="threshold threshold-low" style="left:35%"></div>
+        <div class="threshold threshold-high" style="left:65%"></div>
+      </div>
+    </div>
+
+    <div class="components" id="components"></div>
+
+    <div class="stat-row">
+      <div class="stat"><span class="stat-num" id="blink-rate">--</span><span class="stat-cap">blinks/min</span></div>
+      <div class="stat"><span class="stat-num" id="saccades">--</span><span class="stat-cap">saccades</span></div>
+    </div>
+
+    <div class="provenance">
+      <h3>What this is measured from</h3>
+      <ul>
+        <li><b>Blink rate</b> — ocular (EOG) on AF7/AF8. ~5/min absorbed, ~26/min diffuse.</li>
+        <li><b>Alpha</b> — cortical, 8–13 Hz at TP9/TP10. The one true brain signal here.</li>
+        <li><b>Stillness</b> — the headband's IMU. Not a brain signal.</li>
+      </ul>
+      <p class="caveat">No frontal-theta "focus score". Muse references to FPz, which cancels
+      frontal-midline theta, and the blink artifact is 50× larger than what's left.</p>
+    </div>
+  </aside>
+
+  <!-- CENTRE: the table -->
+  <section class="table-wrap">
+    <div class="table-head">
+      <h2>The table</h2>
+      <p id="table-caption">Look at a design. It highlights. No calibration.</p>
+    </div>
+
+    <div class="table" id="table">
+      <div class="gaze-axis"><div class="gaze-marker" id="gaze-marker"></div></div>
+      <div class="variants" id="variants"></div>
+    </div>
+
+    <div class="flag-toast" id="flag-toast"></div>
+
+    <div class="stage">
+      <div class="stage-title">Stage controls <span>simulated subject</span></div>
+      <div class="stage-row">
+        <label>gaze</label>
+        <input type="range" id="sim-gaze" min="-100" max="100" value="0">
+        <span class="stage-hint">left ← → right</span>
+      </div>
+      <div class="stage-row">
+        <label>effort</label>
+        <input type="range" id="sim-effort" min="0" max="100" value="70">
+        <span class="stage-hint">diffuse ← → focused</span>
+      </div>
+      <div class="stage-row buttons">
+        <button id="btn-blink">Double-blink · flag</button>
+        <button id="btn-clench">Jaw clench · confirm</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: the project -->
+  <aside class="panel panel-right">
+    <h2>Project</h2>
+
+    <form class="agent-form" id="agent-form">
+      <textarea id="agent-input" rows="3"
+        placeholder="Tell the agent what to change…"></textarea>
+      <button type="submit" id="agent-send">Send at current effort</button>
+    </form>
+
+    <div class="history" id="history">
+      <p class="empty">Nothing recorded yet. Every entry carries the effort measured
+      when it was written.</p>
+    </div>
+  </aside>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

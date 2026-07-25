@@ -1,0 +1,237 @@
+# Bench
+
+**The workbench knows what you're looking at, and how hard you're thinking.**
+
+Physical products get built in a mess. CAD lives in two different packages, the
+STEP files are on someone's desktop, the feedback is in email, and two weeks
+later nobody remembers why the wall thickness changed. Software solved this with
+git and then handed it to agents. Hardware never got either.
+
+Bench is the missing input layer. An overhead camera-projector watches the desk
+and draws on it. An EEG headband watches the person. Together they turn what
+happens at a physical workbench into a project history an agent can actually
+reason over.
+
+---
+
+## The three pieces
+
+| Piece | What it does | Status |
+|---|---|---|
+| **Desk live view** | Prism's overhead camera + projector. Sees what's on the table, recognises objects, projects the UI back down onto the surface. | Needs Prism SDK — see *Open questions* |
+| **Control view** | The screen version of the desk. Lay out what's on it, add design variants, drive the demo. | ✅ Built |
+| **Operator state** | Muse EEG. Effort level, and a deliberate flag gesture. | ✅ Built and tested |
+| **Boxic** | The project backend — GitHub for the physical world. Where the history, variants, BOM and artifacts actually live. | ⚠️ Not yet wired (no access) |
+
+---
+
+## The idea in one paragraph
+
+You put two printed design variants on the desk. Prism sees them and projects a
+label under each. You look at one — **it highlights.** You didn't press anything
+and you never calibrated anything. Meanwhile the headband is tracking how engaged
+you are. Type a lazy request to the agent while you're diffuse and it refuses and
+asks you a question instead. Type a considered one while you're locked in and it
+acts and merges. Double-blink to flag something as deliberate and override the
+meter. At the end of the session you have a project history where every entry
+carries the state of the person who wrote it — which is training data no
+software repo has ever had.
+
+---
+
+## Why the EEG isn't a gimmick
+
+This is the question a judge asks in the first ten seconds, so here is the answer.
+
+The EEG does **two** jobs nothing else on the desk can do:
+
+1. **It knows which moments mattered.** A camera pointed at a bench for eight
+   hours produces eight hours of nothing. The brain is the only sensor that
+   knows *that one* was worth keeping.
+2. **It works when your hands don't.** Your hands are holding a part in
+   alignment, or covered in flux. That's when you most need to mark something
+   and least can.
+
+And the effort score is a **safety guardrail.** Hardware hurts you in ways
+software doesn't. Below threshold, destructive operations lock.
+
+---
+
+## What we actually measure (and what we refuse to)
+
+The Muse has four dry electrodes: TP9, AF7, AF8, TP10, referenced to FPz. That
+montage decides everything. We were rigorous about this because overclaiming is
+how EEG demos die.
+
+**What drives the effort score:**
+
+| Signal | What it is | Weight |
+|---|---|---|
+| **Blink rate** | Ocular (EOG) on AF7/AF8. ~5/min when absorbed, ~26/min when diffuse — a 5× effect on the two electrodes with the best contact. | 60% |
+| **Alpha** | Cortical, 8–13 Hz at TP9/TP10. The one genuine brain signal here. | 25% |
+| **Stillness** | The headband's IMU. Not a brain signal, and the UI says so. | 15% |
+
+**What we deliberately did NOT build**, and why — this list is a credibility
+asset, not an apology:
+
+- **No frontal-theta "focus score."** The workload literature measures frontal
+  *midline* theta at Fz/FCz. Muse has no midline electrode and references to
+  FPz, which *cancels* frontal-midline potentials rather than attenuating them.
+  Worse, the blink artifact sits in the same band 50× larger — so the meter
+  would be a blink counter in a lab coat.
+- **No theta/beta "attention" metric.** Discredited in its own clinical
+  literature, and on dry electrodes the beta band is dominated by jaw muscle. A
+  rising score would mostly mean the presenter clenched.
+- **No error-related potentials.** The ERN comes from anterior cingulate and
+  peaks at FCz. We have no central electrode. Structurally unmeasurable here.
+- **Nothing that "reads your thoughts."** Four dry electrodes, two of which are
+  functionally EOG sensors.
+
+### The part with no calibration
+
+Left-versus-right attention needs **no calibration step**, and the reason is
+worth saying out loud: every quantity is a **contrast between two electrodes**,
+not a level. Levels drift with fit, sweat and session time. A left-minus-right
+difference divides that drift out.
+
+Two complementary signals:
+
+- **Horizontal EOG (AF7 − AF8)** is fast. The eye is a standing dipole, so
+  looking right drives AF8 positive and AF7 negative. Lands in tens of
+  milliseconds — but the headband is AC-coupled, so it decays within seconds.
+- **Alpha lateralisation (TP9 vs TP10)** is slow and *holds*. Alpha suppresses
+  contralateral to attended space. As a ratio it is self-normalising, and it
+  tracks covert attention even when the eyes are still.
+
+So the EOG catches the switch and the alpha holds the state. The blend is
+weighted by which signal is currently saying anything — verified: after holding
+a look for 15 s the ocular term had decayed to −0.08 while alpha carried the
+position at −1.00, and the highlight stayed locked on.
+
+Blinks and gaze are separated by physics, not thresholds: both eyelids move
+together so a blink is **common mode** (AF7 + AF8), while gaze rotates the
+dipole one way so it is **differential** (AF7 − AF8).
+
+---
+
+## Measured performance
+
+From `backend/eeg` against the simulated subject:
+
+```
+focused          effort 94/100 at  6.0 blinks/min
+diffuse          effort 20/100 at 28.0 blinks/min
+gaze zones       4/4 correct (left/right/left/right)
+flag gesture     3/3 detected, 281–288 ms inter-blink gaps
+false positives  0 across 30 s of heavy natural blinking at 28/min
+diffuse → locked 15 s     |     re-engaged → unlocked 6 s
+```
+
+---
+
+## Run it
+
+```bash
+pip install -r requirements.txt
+python -m backend.server          # simulated subject, no hardware needed
+# open http://localhost:8000
+```
+
+With a real Muse:
+
+```bash
+EEG_SOURCE=osc python -m backend.server        # Mind Monitor on a phone → OSC/UDP
+EEG_SOURCE=brainflow MUSE_BOARD_ID=39 python -m backend.server
+```
+
+**Use the Mind Monitor path on stage.** It moves the Bluetooth link off the
+laptop and into the presenter's pocket — ~30 cm instead of ~3 m, worth about
+20 dB of link budget in a room with several hundred radios fighting over an
+83 MHz band. Board IDs: Muse 2 = 38, Muse S = 39, Muse S Athena = 67.
+
+> Venue WiFi usually enables AP client isolation, which silently drops
+> phone→laptop UDP with no error anywhere. If no packets arrive, put the laptop
+> on the phone's hotspot. **Test this first, not at 3am.**
+
+### Stage controls
+
+Arrow keys beat sliders under stage lights.
+
+| Key | Effect |
+|---|---|
+| `←` / `→` | look left / right |
+| `↑` / `↓` | focused / diffuse |
+| `b` | double-blink (flag) |
+| `c` | jaw clench (confirm) |
+
+---
+
+## Architecture
+
+The EEG pipeline emits **semantic events** — `effort`, `focus_changed`, `flag` —
+over a WebSocket. Nothing downstream knows whether a headband, a phone, or the
+simulator produced them.
+
+```
+Muse ──┬─ Mind Monitor (OSC/UDP) ──┐
+       ├─ BrainFlow (native BLE) ───┼──▶ EffortEstimator ──┐
+       └─ Simulator ────────────────┘    LateralAttention ─┴──▶ /ws ──▶ desk view
+                                                                    └──▶ control view
+Prism ──▶ objects + hand position ─────────────────────────────▶ zone mapping
+                                                                       │
+                                                        ProjectAgent ◀──┘
+                                                              └──▶ Boxic
+```
+
+That decoupling is the point: the two halves of the team build in parallel, and
+a dead headband degrades the demo instead of ending it.
+
+```
+backend/eeg/metrics.py     effort score, blink + clench detection
+backend/eeg/attention.py   calibration-free left/right attention
+backend/eeg/sources.py     Mind Monitor / BrainFlow / simulator
+backend/store.py           project, variants, effort-scored history
+backend/agent.py           the effort gate
+backend/server.py          WebSocket + REST
+web/                       control view
+```
+
+---
+
+## Next: the glue
+
+**1. Hand position beats gaze for the referent.** Right now `LateralAttention`
+maps EOG + alpha onto left/right zones. But if Prism reports *which object the
+hand is on or near*, that's a far more robust referent than inferring gaze —
+and it's what "interacted with the most" actually means. Then the split gets
+cleaner:
+
+> **Prism answers *what*. The EEG answers *how much it mattered*.**
+
+The EEG stops having to carry the referent at all and only supplies engagement
+plus the flag. Fewer failure modes, stronger story. `LateralAttention.set_zones()`
+already takes an arbitrary `{id: position}` map, so this is a small change once
+object positions are available.
+
+**2. Boxic as the backend.** `backend/store.py` is currently in-memory and
+seeded with a fake project. It should be a thin client against Boxic instead:
+variants, versions, history and BOM live there, and Bench writes effort-scored
+contributions into it. The `ProjectStore` interface was kept deliberately narrow
+for this swap.
+
+---
+
+## Open questions
+
+- **Boxic access.** Blocked — `add_repo` refuses cross-owner adds on this
+  session and the repo 404s unauthenticated, which is indistinguishable between
+  private and nonexistent. Need its API surface or a session rooted at that repo.
+- **Prism SDK.** No public developer surface documented. Resolve early: can we
+  get object detections and project custom content, or do we roll our own
+  overhead camera + projector rig?
+- **Which Muse?** Muse 2 / S: every software path works. Athena (MS-03): needs
+  BrainFlow ≥ 5.22.2, muselsl ≥ 2.5.0, or Mind Monitor ≥ 2.4.3 — BlueMuse and
+  Petal are out.
+- **Screen the presenter.** ~5–10% of people have very low resting alpha, and
+  TP9/TP10 sit behind the ears where thick or curly hair blocks contact. Check
+  on day one, and have a backup presenter.
