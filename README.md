@@ -149,7 +149,8 @@ diffuse → locked 15 s     |     re-engaged → unlocked 6 s
 | Screen | URL | Who looks at it |
 |---|---|---|
 | **Desk** | `/desk` | The audience. Live camera of the table with the overlay drawn on top. |
-| **Control** | `/` | You. Effort breakdown, history, agent console, stage controls. |
+| **Control** | `/` | You. Effort breakdown, agent console, stage controls. |
+| **Record** | `/project` | The payoff. What the session produced: decision log, designs, talk-to-your-project. |
 
 We have no Prism SDK, so `desk/desk_server.py` does the seeing half with a
 second webcam and puts the drawing half on a screen instead of a projector. For
@@ -259,6 +260,7 @@ gesture/                   MediaPipe thumbs up/down (teammate's module)
 desk/                      desk camera + object detection
 web/index.html             control view
 web/desk.html              desk view (second screen)
+web/project.html           the record — decision log + talk to your project
 ```
 
 Run both processes for the full loop:

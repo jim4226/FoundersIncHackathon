@@ -103,6 +103,9 @@ class Contribution:
     status: str                   # proposed | merged | challenged | rejected
     created_at: float
     artifact_id: str | None = None
+    # Which design on the table this decision was about. Distinct from
+    # artifact_id: artifacts are files, variants are the physical options.
+    variant_id: str | None = None
     agent_response: str | None = None
 
     def to_dict(self) -> dict:
@@ -198,6 +201,7 @@ class ProjectStore:
         effort: float | None,
         flagged: bool,
         artifact_id: str | None = None,
+        variant_id: str | None = None,
         status: str = "proposed",
     ) -> Contribution:
         with self._lock:
@@ -213,6 +217,7 @@ class ProjectStore:
                 status=status,
                 created_at=time.time(),
                 artifact_id=artifact_id,
+                variant_id=variant_id,
             )
             self.contributions.append(contribution)
             return contribution

@@ -5,5 +5,13 @@ numpy>=1.26
 scipy>=1.13
 python-osc>=1.9
 anthropic>=0.40
+
+# The gesture and desk bridges are WebSocket clients; without this they fail at
+# connect time and surface only as "disconnected (ModuleNotFoundError)".
+websockets>=13.0
+
+# Desk camera object detection (desk/desk_server.py).
+opencv-python>=4.9
+
 # Only needed for EEG_SOURCE=brainflow. Native BLE; dongles deprecated in 5.22.0.
 brainflow>=5.22.2

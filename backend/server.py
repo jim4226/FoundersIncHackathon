@@ -154,11 +154,18 @@ async def _on_vote(vote: str, payload: dict) -> None:
     if reverted:
         body += " Sent back to design — back to the drawing board."
     if not binding:
-        body += " Operator was diffuse — held for review rather than merged."
+        # Unmeasured is not the same claim as diffuse. Saying "the operator was
+        # diffuse" when the headband had not produced a reading yet would be
+        # asserting a measurement we never took.
+        body += (
+            " No effort reading yet — held for review rather than merged."
+            if effort is None else
+            " Operator was diffuse — held for review rather than merged."
+        )
 
     store.add_contribution(
         author="you", body=body, kind="decision", effort=effort,
-        flagged=False, artifact_id=None,
+        flagged=False, variant_id=variant.id,
         status="merged" if binding else "challenged",
     )
 
@@ -241,6 +248,10 @@ class AgentRequest(BaseModel):
     author: str = "you"
     override_effort: float | None = None
     flagged: bool = False
+    # "change" writes to the project and is gated on effort; "ask" reads it and
+    # is not. Reads must not be recorded as decisions -- logging every question
+    # as a change would corrupt the record this system exists to keep.
+    intent: str = "change"
 
 
 @app.get("/api/project")
@@ -267,6 +278,12 @@ async def post_agent(req: AgentRequest) -> dict:
     not an average over the session. That is the whole mechanism: the same
     sentence gets a different response depending on who you were when you wrote it.
     """
+    if req.intent == "ask":
+        result = await asyncio.to_thread(agent.answer, req.message)
+        payload = {"contribution": None, "agent": result, "question": req.message}
+        await _broadcast({"type": "agent_answer", **payload})
+        return payload
+
     effort = req.override_effort
     if effort is None:
         effort = (_state.get("effort") or {}).get("effort")
@@ -299,7 +316,7 @@ async def promote(variant_id: str) -> dict:
     store.add_contribution(
         author="you", body=f"Promoted {variant.label} to the main branch.",
         kind="decision", effort=(_state.get("effort") or {}).get("effort"),
-        flagged=True, status="merged",
+        flagged=True, variant_id=variant.id, status="merged",
     )
     attention.set_zones(store.zones())
     await _broadcast({"type": "promoted", "variant": variant.to_dict(),
@@ -355,6 +372,11 @@ if WEB_DIR.exists():
     def desk_view() -> FileResponse:
         """Desk view — the second screen, camera plus overlay."""
         return FileResponse(WEB_DIR / "desk.html")
+
+    @app.get("/project")
+    def project_view() -> FileResponse:
+        """The record — what the bench session actually produced."""
+        return FileResponse(WEB_DIR / "project.html")
 
 
 if __name__ == "__main__":
