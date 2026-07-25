@@ -31,7 +31,10 @@ HAND_CONNECTIONS = mp.solutions.hands.HAND_CONNECTIONS
 CONF_THRESHOLD = 0.6      # min gesture confidence to consider
 HOLD_SECONDS   = 0.6      # gesture must be held this long before it fires
 COOLDOWN_SECS  = 2.0      # after firing, ignore new triggers this long
-CAM_INDEX      = 0        # dedicated webcam pointed at the hand
+# Which camera this process owns. Two cameras run at once -- the lid camera
+# feeds the browser's /hold view, this one watches the desk -- and a device can
+# only be opened by one process, so they must not both land on index 0.
+CAM_INDEX      = int(os.environ.get("CAM_INDEX", "0"))
 WS_PORT        = 8765
 MODEL_PATH     = "gesture_recognizer.task"
 BENCH_WS_URL   = os.environ.get("BENCH_WS_URL", "ws://localhost:8000/ws")
@@ -269,7 +272,11 @@ def main():
 
     cap = cv2.VideoCapture(CAM_INDEX)
     if not cap.isOpened():
-        raise RuntimeError(f"Could not open camera index {CAM_INDEX}")
+        raise RuntimeError(
+            f"Could not open camera index {CAM_INDEX}. Another process may already "
+            f"own it -- the browser holds a camera for the /hold view. "
+            f"Try CAM_INDEX=1 python gesture_server.py"
+        )
 
     with GestureRecognizer.create_from_options(options) as recognizer:
         while cap.isOpened():

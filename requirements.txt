@@ -1,0 +1,9 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+numpy>=1.26
+scipy>=1.13
+python-osc>=1.9
+anthropic>=0.40
+# Only needed for EEG_SOURCE=brainflow. Native BLE; dongles deprecated in 5.22.0.
+brainflow>=5.22.2
