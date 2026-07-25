@@ -33,7 +33,8 @@ HOLD_SECONDS   = 0.6      # gesture must be held this long before it fires
 COOLDOWN_SECS  = 2.0      # after firing, ignore new triggers this long
 CAM_INDEX      = 0        # dedicated webcam pointed at the hand
 WS_PORT        = 8765
-MODEL_PATH     = "gesture_recognizer.task"
+MODEL_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "gesture_recognizer.task")  # resolve next to script
 BENCH_WS_URL   = os.environ.get("BENCH_WS_URL", "ws://localhost:8000/ws")
 FLASH_SECS     = 2.5      # how long a vote verdict stays on screen
 
