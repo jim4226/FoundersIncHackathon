@@ -5,10 +5,17 @@ Reads a webcam, recognizes thumbs-up / thumbs-down with MediaPipe's built-in
 Gesture Recognizer, debounces for demo stability, and broadcasts an
 approve/reject event over a WebSocket that the renderer subscribes to.
 
+It also *subscribes back* to the bench (`ws://localhost:8000/ws`) when it is
+running, so the hand overlay reflects the fused verdict: the silhouette glow
+tracks live EEG effort, a tag shows which design is in focus, and a vote flash
+shows what actually happened (promoted / held-because-diffuse / no-focus). If
+the bench is offline the overlay degrades to the standalone camera demo.
+
 Run:  python gesture_server.py
 Keys: ESC quit  |  a = force approve  |  r = force reject  (stage fallback)
 """
 
+import os
 import time
 import json
 import threading
@@ -27,8 +34,16 @@ COOLDOWN_SECS  = 2.0      # after firing, ignore new triggers this long
 CAM_INDEX      = 0        # dedicated webcam pointed at the hand
 WS_PORT        = 8765
 MODEL_PATH     = "gesture_recognizer.task"
+BENCH_WS_URL   = os.environ.get("BENCH_WS_URL", "ws://localhost:8000/ws")
+FLASH_SECS     = 2.5      # how long a vote verdict stays on screen
 
 GESTURE_MAP = {"Thumb_Up": "approve", "Thumb_Down": "reject"}
+
+# BGR colours shared by overlay + verdict flash
+C_APPROVE = (90, 220, 60)    # green
+C_REJECT  = (60, 60, 255)    # red
+C_HOLD    = (0, 180, 255)    # amber — recorded but not binding
+C_NEUTRAL = (180, 180, 180)  # grey
 
 # ------------------------- websocket broadcast ------------------------
 clients, clients_lock = set(), threading.Lock()
@@ -104,26 +119,130 @@ def maybe_fire(now: float):
     return None
 
 
-def draw_hand(frame, landmarks, color):
-    """Neon skeleton + translucent silhouette glow over the tracked hand."""
+# ------------------- bench feedback loop (consumer) -------------------
+# Best-effort subscription to the bench so the overlay can show the fused
+# verdict. Everything here degrades to None/False when the bench is offline.
+bench = {"connected": False, "effort": None, "focus_label": None, "flash": None}
+bench_lock = threading.Lock()
+
+
+def set_flash(text, color, secs=FLASH_SECS):
+    with bench_lock:
+        bench["flash"] = {"text": text, "color": color, "until": time.time() + secs}
+
+
+def handle_bench_message(msg):
+    t = msg.get("type")
+    if t == "tick":
+        eff = (msg.get("effort") or {}).get("effort")
+        att = msg.get("attention") or {}
+        zone = att.get("zone") if att.get("confidence", 0) > 0.35 else None
+        label = next((v.get("label") for v in msg.get("variants", [])
+                      if v.get("id") == zone), None)
+        with bench_lock:
+            bench["effort"] = eff
+            bench["focus_label"] = label
+    elif t == "focus_changed":
+        with bench_lock:
+            bench["focus_label"] = (msg.get("variant") or {}).get("label")
+    elif t == "vote":
+        label = (msg.get("variant") or {}).get("label", "design")
+        if msg.get("vote") == "approve":
+            if msg.get("decisive") and msg.get("promoted"):
+                set_flash(f"APPROVED - {label} promoted", C_APPROVE)
+            elif msg.get("binding"):
+                set_flash(f"APPROVED - {label} - staged", C_APPROVE)
+            else:
+                set_flash(f"HELD - {label} - you were diffuse", C_HOLD)
+        else:  # reject
+            if msg.get("binding"):
+                set_flash(f"REJECTED - {label}", C_REJECT)
+            else:
+                set_flash(f"REJECTED - {label} - held for review", C_HOLD)
+    elif t == "vote_unresolved":
+        set_flash("no design in focus", C_NEUTRAL)
+
+
+def bench_subscriber():
+    """Reconnecting client to the bench /ws. Never raises into the main loop."""
+    from websockets.sync.client import connect
+    while True:
+        try:
+            with connect(BENCH_WS_URL, open_timeout=5) as ws:
+                with bench_lock:
+                    bench["connected"] = True
+                print(f"[bench] connected to {BENCH_WS_URL}")
+                for raw in ws:
+                    try:
+                        handle_bench_message(json.loads(raw))
+                    except json.JSONDecodeError:
+                        continue
+        except Exception:
+            pass  # bench not up yet, or dropped — retry below
+        with bench_lock:
+            bench["connected"], bench["effort"], bench["focus_label"] = False, None, None
+        time.sleep(3.0)
+
+
+def draw_hand(frame, landmarks, color, effort=None):
+    """Neon skeleton + silhouette glow. Aura intensity tracks EEG effort."""
     h, w = frame.shape[:2]
     pts = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
+
+    # effort in [0,1] drives fill opacity + bone thickness; None = neutral
+    e = 0.6 if effort is None else max(0.0, min(1.0, effort / 100.0))
+    fill_alpha = 0.12 + 0.28 * e
+    glow = int(4 + 8 * e)
 
     # translucent filled silhouette (convex hull) for the "glow" body
     overlay = frame.copy()
     hull = cv2.convexHull(np.array(pts, dtype=np.int32))
     cv2.fillConvexPoly(overlay, hull, color)
-    cv2.addWeighted(overlay, 0.22, frame, 0.78, 0, dst=frame)
+    cv2.addWeighted(overlay, fill_alpha, frame, 1 - fill_alpha, 0, dst=frame)
 
     # bones: thick color glow underneath, thin white core on top
     for a, b in HAND_CONNECTIONS:
-        cv2.line(frame, pts[a], pts[b], color, 6, cv2.LINE_AA)
+        cv2.line(frame, pts[a], pts[b], color, glow, cv2.LINE_AA)
         cv2.line(frame, pts[a], pts[b], (255, 255, 255), 1, cv2.LINE_AA)
 
     # joints
     for p in pts:
         cv2.circle(frame, p, 5, color, -1, cv2.LINE_AA)
-        cv2.circle(frame, p, 8, color, 1, cv2.LINE_AA)
+        cv2.circle(frame, p, max(6, glow), color, 1, cv2.LINE_AA)
+
+
+def draw_hud(frame):
+    """Bench panel (effort bar + focus) top-right, and the vote verdict flash."""
+    h, w = frame.shape[:2]
+    with bench_lock:
+        connected, effort = bench["connected"], bench["effort"]
+        focus, flash = bench["focus_label"], bench["flash"]
+
+    x0 = w - 250
+    if connected:
+        cv2.putText(frame, "BENCH", (x0, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 255, 200), 2)
+        if effort is not None:
+            bar_w, fill = 210, int(210 * max(0.0, min(1.0, effort / 100.0)))
+            bc = C_APPROVE if effort >= 65 else C_HOLD if effort >= 35 else C_REJECT
+            cv2.rectangle(frame, (x0, 52), (x0 + bar_w, 72), (70, 70, 70), 1)
+            cv2.rectangle(frame, (x0, 52), (x0 + fill, 72), bc, -1)
+            cv2.putText(frame, f"effort {effort:.0f}", (x0, 92),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (235, 235, 235), 1)
+        cv2.putText(frame, f"focus: {focus or '--'}", (x0, 116),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (235, 235, 235), 1)
+    else:
+        cv2.putText(frame, "bench offline (standalone)", (x0 - 60, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (140, 140, 140), 1)
+
+    if flash and time.time() < flash["until"]:
+        text, color = flash["text"], flash["color"]
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 3)
+        cx, cy = (w - tw) // 2, h - 55
+        cv2.rectangle(frame, (cx - 20, cy - th - 20), (cx + tw + 20, cy + 18),
+                      (0, 0, 0), -1)
+        cv2.putText(frame, text, (cx, cy),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3, cv2.LINE_AA)
 
 
 def emit(vote: str, source: str):
@@ -139,6 +258,7 @@ def emit(vote: str, source: str):
 # ------------------------------ main ----------------------------------
 def main():
     threading.Thread(target=start_ws, daemon=True).start()
+    threading.Thread(target=bench_subscriber, daemon=True).start()
 
     options = GestureRecognizerOptions(
         base_options=BaseOptions(model_asset_path=MODEL_PATH),
@@ -167,18 +287,23 @@ def main():
                 emit(fired, source="gesture")
 
             # ---- on-screen feedback (looks good + helps debugging) ----
+            with bench_lock:
+                b_connected, b_effort = bench["connected"], bench["effort"]
             name = latest["name"]
             label = f'{name} {latest["score"]:.2f}' if name else "..."
             # BGR: green approve, red reject, cyan neutral
-            color = (90, 220, 60) if name == "Thumb_Up" else \
-                    (60, 60, 255) if name == "Thumb_Down" else (255, 255, 0)
+            color = C_APPROVE if name == "Thumb_Up" else \
+                    C_REJECT if name == "Thumb_Down" else (255, 255, 0)
             if latest["landmarks"]:
-                draw_hand(frame, latest["landmarks"], color)
+                draw_hand(frame, latest["landmarks"], color, b_effort)
             cv2.putText(frame, label, (20, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
-            if fired:
+            # When the bench is up it owns the verdict (the fused outcome shows
+            # in the flash); standalone, show the raw local fire.
+            if fired and not b_connected:
                 cv2.putText(frame, fired.upper(), (20, 120),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.6, color, 4)
+            draw_hud(frame)
             cv2.imshow("gesture", frame)
 
             key = cv2.waitKey(1) & 0xFF

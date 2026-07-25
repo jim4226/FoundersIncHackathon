@@ -47,6 +47,33 @@ Keys in the preview window:
 - `a` — force an approve event (stage fallback if the camera misbehaves)
 - `r` — force a reject event
 
+## Feedback loop with the bench
+
+When the bench (`backend/server.py`, port 8000) is running, this process also
+**subscribes back** to `ws://localhost:8000/ws`, so the camera overlay becomes a
+live readout of the fused verdict — on the one screen the audience is watching:
+
+- **Effort aura** — the silhouette glow opacity + skeleton thickness track live
+  EEG effort. Locked-in = bright and solid, diffuse = thin and dim.
+- **Focus tag** — a `focus: Shell A` label (top-right) shows which design the
+  operator is attending to, so the hand shows its referent *before* the verdict.
+- **Verdict flash** — when a vote resolves, the overlay shows what *actually*
+  happened, not the raw gesture: `APPROVED - Shell A promoted`,
+  `HELD - Shell A - you were diffuse`, `REJECTED - Shell B`, or
+  `no design in focus`. Same thumbs-up, visibly different outcome.
+
+This needs **no backend changes** — the bench already broadcasts `tick` and
+`vote` events. It's fully optional and best-effort: if the bench is offline the
+overlay falls back to the standalone camera demo (shown as
+`bench offline (standalone)`). Point it elsewhere with `BENCH_WS_URL`.
+
+Full loop — run both processes:
+
+```bash
+python -m backend.server            # :8000  bench (from repo root)
+python gesture/gesture_server.py    # :8765  votes + subscribes back to :8000
+```
+
 ## Tuning (top of `gesture_server.py`)
 
 | constant         | what it does                                        |
