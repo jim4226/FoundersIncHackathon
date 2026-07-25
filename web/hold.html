@@ -75,9 +75,27 @@
     </p>
   </section>
 
-  <!-- RIGHT: how it sits -->
+  <!-- RIGHT: which camera, and how the part sits -->
   <aside class="panel panel-right">
-    <h2>Pose</h2>
+    <h2>Camera</h2>
+
+    <div class="control">
+      <label>this view <span class="hint" id="camera-count">—</span></label>
+      <select id="camera" disabled><option>starting…</option></select>
+    </div>
+    <p class="camera-note">
+      This is the <b>hand</b> camera — your laptop lid is the right one. The desk
+      camera stays with the desk view; picking it here would take it away from
+      the table.
+    </p>
+    <label class="mirror-row">
+      <input type="checkbox" id="toggle-mirror" checked>
+      <span>mirror</span>
+      <span class="mirror-hint">on for a lid camera, off overhead</span>
+      <kbd>m</kbd>
+    </label>
+
+    <h2 class="pose-title">Pose</h2>
 
     <div class="control">
       <label>rotate <span class="hint">← →</span></label>
@@ -112,6 +130,9 @@
           knuckles, so it rolls with the hand instead of sliding on it.</li>
         <li><b>Real occlusion.</b> The camera's own pixels are re-drawn over the
           fingers, so the hand closes over the part.</li>
+      <li><b>Two cameras, two jobs.</b> The lid camera watches your hand here;
+          the desk camera watches the table. They run in separate processes, so
+          both are live at once — as long as neither grabs the other's device.</li>
       </ul>
       <p class="caveat">Geometry is parametric, generated in millimetres from the
       same numbers as the STEP file. No mesh assets, no WebGL, no CDN for the

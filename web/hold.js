@@ -64,6 +64,9 @@ const video = el('cam');
 const state = {
   project: BenchCAD.projects[0],
   partIndex: 0,
+  deviceId: null,          // which camera; null = whatever the browser picks
+  cameras: [],
+  mirror: true,            // self-view cameras read backwards without this
   spanMm: KNUCKLE_SPAN_MM,
   tilt: -0.32,
   spin: 0,
@@ -101,23 +104,118 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-    audio: false,
-  });
-  video.srcObject = stream;
-  await video.play();
+/* ------------------------------------------------------------- the camera */
+
+/* A laptop lid camera and a webcam pointed at the desk are both plausible
+   sources and the browser's default is not reliably the one you want, so the
+   source is picked explicitly and remembered. */
+
+const CAM_KEY = 'bench.hold.camera';
+const MIRROR_KEY = 'bench.hold.mirror';
+
+function stopCamera() {
+  const stream = video.srcObject;
+  if (!stream) return;
+  stream.getTracks().forEach((t) => t.stop());
+  video.srcObject = null;
 }
 
+async function startCamera(deviceId) {
+  stopCamera();
+  const size = { width: { ideal: 1280 }, height: { ideal: 720 } };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: deviceId ? { deviceId: { exact: deviceId }, ...size } : { facingMode: 'user', ...size },
+      audio: false,
+    });
+    video.srcObject = stream;
+  } catch (err) {
+    // A remembered camera can be unplugged, or busy in another app. Falling
+    // back to the default beats refusing to open anything at all.
+    if (!deviceId) throw err;
+    const stream = await navigator.mediaDevices.getUserMedia({ video: size, audio: false });
+    video.srcObject = stream;
+    flash('That camera is unavailable — using the default.', '#ffb547');
+  }
+  await video.play();
+
+  const track = video.srcObject.getVideoTracks()[0];
+  state.deviceId = (track && track.getSettings().deviceId) || deviceId || null;
+  if (state.deviceId) localStorage.setItem(CAM_KEY, state.deviceId);
+
+  // Switching source teleports the hand; drop the smoothing so it re-seats
+  // instantly rather than sliding across the frame.
+  smooth.ready = false;
+  landmarks = null;
+  return track ? track.label : '';
+}
+
+/* Device labels are blank until camera permission has been granted, so this is
+   always called *after* the first successful getUserMedia. */
+async function refreshCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  state.cameras = devices.filter((d) => d.kind === 'videoinput');
+
+  const select = el('camera');
+  select.replaceChildren(...state.cameras.map((cam, i) => {
+    const option = document.createElement('option');
+    option.value = cam.deviceId;
+    option.textContent = cam.label || `Camera ${i + 1}`;
+    return option;
+  }));
+
+  if (state.deviceId && state.cameras.some((c) => c.deviceId === state.deviceId)) {
+    select.value = state.deviceId;
+  }
+  select.disabled = state.cameras.length === 0;
+  el('camera-count').textContent = state.cameras.length > 1
+    ? `${state.cameras.length} available`
+    : (state.cameras.length ? 'only one' : 'none found');
+}
+
+async function useCamera(deviceId) {
+  try {
+    const label = await startCamera(deviceId);
+    await refreshCameras();
+    setMode(state.mode === 'tracking' ? 'tracking' : 'searching', label || 'show your hand');
+  } catch (err) {
+    setMode('simulated', String(err && err.message ? err.message : err).slice(0, 80));
+  }
+}
+
+function cycleCamera() {
+  if (state.cameras.length < 2) return;
+  const at = state.cameras.findIndex((c) => c.deviceId === state.deviceId);
+  useCamera(state.cameras[(at + 1) % state.cameras.length].deviceId);
+}
+
+/* The tracker is the one thing fetched from the network. A blocked CDN tends to
+   hang rather than fail, and a demo stuck on "loading" forever is worse than one
+   that admits it can't get there -- so the load is raced against a deadline. */
+const TRACKER_TIMEOUT_MS = 12000;
+
 async function startTracker() {
-  const vision = await import(`${TASKS_VISION}/vision_bundle.mjs`);
-  const fileset = await vision.FilesetResolver.forVisionTasks(`${TASKS_VISION}/wasm`);
-  landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
-    runningMode: 'VIDEO',
-    numHands: 1,
+  const load = (async () => {
+    const vision = await import(`${TASKS_VISION}/vision_bundle.mjs`);
+    const fileset = await vision.FilesetResolver.forVisionTasks(`${TASKS_VISION}/wasm`);
+    return vision.HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
+      runningMode: 'VIDEO',
+      numHands: 1,
+    });
+  })();
+
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('hand model unreachable — check the network')),
+      TRACKER_TIMEOUT_MS);
   });
+
+  try {
+    landmarker = await Promise.race([load, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function boot() {
@@ -125,15 +223,23 @@ async function boot() {
   renderRail();
   connectBench();
 
-  const forceSim = new URLSearchParams(location.search).has('sim');
-  if (!forceSim) {
+  const params = new URLSearchParams(location.search);
+  state.mirror = localStorage.getItem(MIRROR_KEY) !== 'off';
+  el('toggle-mirror').checked = state.mirror;
+
+  if (!params.has('sim')) {
     try {
       setMode('starting', 'opening camera');
-      await startCamera();
+      const label = await startCamera(params.get('cam') || localStorage.getItem(CAM_KEY));
+      await refreshCameras();
       setMode('starting', 'loading hand model');
       await startTracker();
-      setMode('searching', 'show your hand');
+      setMode('searching', label || 'show your hand');
+      navigator.mediaDevices.addEventListener('devicechange', refreshCameras);
     } catch (err) {
+      // Camera without tracking cannot place a part, so drop back to the fully
+      // simulated view rather than leaving a live feed with nothing on it.
+      stopCamera();
       setMode('simulated', String(err && err.message ? err.message : err).slice(0, 80));
     }
   } else {
@@ -201,14 +307,30 @@ function smoothFrame(f, dt) {
   smooth.v = unit3(smooth.v);
 }
 
-/* The camera is mirrored so moving right moves the render right; landmark x is
-   mirrored to match, and z is scaled into pixels (MediaPipe reports it on
-   roughly the same scale as x). */
+/* Landmarks are mirrored to match the painted frame, and z is scaled into
+   pixels (MediaPipe reports it on roughly the same scale as x). Mirroring flips
+   the basis handedness, which the renderer already absorbs -- it derives the
+   palm normal and forces it toward the camera either way. */
 function toCanvas(lm, w, h) {
-  return lm.map((p) => [(1 - p.x) * w, p.y * h, -p.z * w]);
+  return lm.map((p) => [(state.mirror ? 1 - p.x : p.x) * w, p.y * h, -p.z * w]);
 }
 
 /* ---------------------------------------------------------------- drawing */
+
+/* The single place the camera frame is painted. The occlusion pass re-uses it
+   so the two can never disagree about fit or mirroring -- a half-mirrored
+   occlusion would put the fingers on the wrong side of the part. */
+function paintVideo(w, h) {
+  const scale = Math.max(w / video.videoWidth, h / video.videoHeight);
+  const dw = video.videoWidth * scale, dh = video.videoHeight * scale;
+  ctx.save();
+  if (state.mirror) {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  ctx.restore();
+}
 
 function drawVideo(w, h) {
   if (!video.videoWidth) {
@@ -216,14 +338,7 @@ function drawVideo(w, h) {
     ctx.fillRect(0, 0, w, h);
     return;
   }
-  // Cover-fit, mirrored.
-  const scale = Math.max(w / video.videoWidth, h / video.videoHeight);
-  const dw = video.videoWidth * scale, dh = video.videoHeight * scale;
-  ctx.save();
-  ctx.translate(w, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
-  ctx.restore();
+  paintVideo(w, h);
   // Knock the room back so the projected part reads as the brightest thing.
   ctx.fillStyle = 'rgba(8,9,12,0.42)';
   ctx.fillRect(0, 0, w, h);
@@ -297,11 +412,7 @@ function occludeWithFingers(pts, w, h, span) {
     }
   }
   ctx.clip();
-  const scale = Math.max(w / video.videoWidth, h / video.videoHeight);
-  const dw = video.videoWidth * scale, dh = video.videoHeight * scale;
-  ctx.translate(w, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  paintVideo(w, h);
   ctx.restore();
 }
 
@@ -541,6 +652,8 @@ document.addEventListener('keydown', (e) => {
     o: () => { state.occlude = !state.occlude; },
     h: () => { state.skeleton = !state.skeleton; },
     f: () => { state.frozen = !state.frozen; },
+    c: () => cycleCamera(),
+    m: () => { el('toggle-mirror').checked = !state.mirror; setMirror(!state.mirror); },
     '[': () => { state.spanMm = Math.max(60, state.spanMm - 2); showSpan(); },
     ']': () => { state.spanMm = Math.min(110, state.spanMm + 2); showSpan(); },
   };
@@ -551,6 +664,13 @@ function showSpan() {
   flash(`knuckle span ${state.spanMm} mm — scale calibration`, '#45e0c0');
 }
 
+function setMirror(on) {
+  state.mirror = on;
+  localStorage.setItem(MIRROR_KEY, on ? 'on' : 'off');
+}
+
+el('camera').addEventListener('change', (e) => useCamera(e.target.value));
+el('toggle-mirror').addEventListener('change', (e) => setMirror(e.target.checked));
 el('rotate').addEventListener('input', (e) => { state.spin = (e.target.value / 100) * Math.PI; });
 el('tilt').addEventListener('input', (e) => { state.tilt = (e.target.value / 100) * 1.2; });
 el('span').addEventListener('input', (e) => { state.spanMm = Number(e.target.value); });

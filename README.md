@@ -91,8 +91,36 @@ guardrail on the table.
 | `1` `2` `3` | Shell A / Shell B / carrier board |
 | `←` `→` `↑` `↓` | rotate · tilt in the palm |
 | `d` `w` `o` `h` | dimensions · wireframe · fingers-in-front · hand skeleton |
+| `c` `m` | next camera · mirror |
 | `[` `]` | calibrate knuckle span, if the scale looks off |
 | `f` | freeze tracking |
+
+### Two cameras, two jobs
+
+The bench runs **two** cameras at once and they must not fight over a device:
+
+| Camera | Watches | Owned by |
+|---|---|---|
+| **Laptop lid** | your hand | the browser, on `/hold` |
+| **Desk camera** | the table | `gesture_server.py` / Prism |
+
+A camera can only be opened by one process, so the desk camera needs to be told
+which index it is once the browser is holding the lid camera:
+
+```bash
+CAM_INDEX=1 python gesture/gesture_server.py     # desk camera, not the lid
+```
+
+On the `/hold` side, pick the lid camera from the **Camera** dropdown (`c`
+cycles). The choice is remembered, so this is a one-time setup per machine, and
+`/hold?cam=<deviceId>` pins it for a scripted demo. **Mirror** is on by default
+— correct for a lid camera facing you, and the thing to turn off if you ever
+point `/hold` at an overhead camera instead, since otherwise moving left moves
+the render right.
+
+If the tracker can't be fetched within 12 s the page releases the camera and
+falls back to the simulated hand, rather than sitting on "loading" with the lid
+light on.
 
 **Geometry is parametric, in millimetres, from the same numbers as the STEP
 file** — no mesh assets, and no WebGL or Three.js either. `web/cad.js` is a
@@ -277,9 +305,12 @@ web/hold.js                hand tracking, palm frame, finger occlusion
 Run both processes for the full loop:
 
 ```bash
-python -m backend.server                 # :8000  bench
-python gesture/gesture_server.py         # :8765  votes
+python -m backend.server                 # :8000  bench  (+ /hold, lid camera)
+CAM_INDEX=1 python gesture/gesture_server.py    # :8765  votes, desk camera
 ```
+
+`CAM_INDEX` defaults to `0`. Set it when the browser already holds index 0 for
+the `/hold` view — see *Two cameras, two jobs* above.
 
 No webcam, or MediaPipe won't install (it has no wheel for Python 3.13/3.14)?
 `gesture/mock_votes.py` speaks the identical protocol on the identical port, so
