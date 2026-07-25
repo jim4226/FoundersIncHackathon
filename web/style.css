@@ -318,3 +318,16 @@ main {
   main { grid-template-columns: 1fr; }
   .panel { max-height: 400px; }
 }
+
+/* ------------------------------------------------- cross-view navigation */
+
+.back {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 11.5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.back:hover { color: var(--focus); border-color: var(--focus-dim); }

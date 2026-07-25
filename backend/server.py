@@ -311,6 +311,13 @@ if WEB_DIR.exists():
     def index() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
 
+    @app.get("/hold")
+    def hold() -> FileResponse:
+        """The CAD-in-hand view. Needs a camera, so it lives on its own page --
+        and it is the same WebSocket stream underneath, which is why the part in
+        your hand can be the part the bench says you are attending to."""
+        return FileResponse(WEB_DIR / "hold.html")
+
 
 if __name__ == "__main__":
     import uvicorn

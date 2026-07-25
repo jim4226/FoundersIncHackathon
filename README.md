@@ -22,6 +22,7 @@ reason over.
 | **Control view** | The screen version of the desk. Lay out what's on it, add design variants, drive the demo. | ✅ Built |
 | **Operator state** | Muse EEG. Effort level, and a deliberate flag gesture. | ✅ Built and tested |
 | **Gesture** | MediaPipe thumbs-up/down → `design_vote` on `ws://localhost:8765`. | ✅ Built (`gesture/`) |
+| **Hold it** | The CAD part rendered into your own hand at 1:1, on the webcam. | ✅ Built (`/hold`) |
 | **Boxic** | The living project record for hardware. Where history, versions and decisions actually live. | ✅ Mapped (`backend/boxic.py`) — needs one write tool |
 
 ### How the three inputs divide the work
@@ -51,6 +52,60 @@ acts and merges. Double-blink to flag something as deliberate and override the
 meter. At the end of the session you have a project history where every entry
 carries the state of the person who wrote it — which is training data no
 software repo has ever had.
+
+---
+
+## Hold it — the part in your hand, at 1:1
+
+`http://localhost:8000/hold`
+
+Show your palm to the camera and the part is *in it*. Not a thumbnail beside the
+video — seated on your hand, rolling as your hand rolls, at the size it will
+actually be.
+
+Three things earn that claim:
+
+> **Scale is real.** Pixels-per-millimetre is derived from the operator's own
+> index-to-pinky knuckle span, not from a slider. A 118 mm enclosure is 118 mm
+> against their fingers.
+> **Pose comes from the palm.** The part is seated on a basis built from wrist
+> and knuckles, so it rolls and yaws with the hand instead of sliding across it.
+> **Fingers occlude it.** After the part is drawn, the camera's own pixels are
+> re-drawn clipped to the finger silhouette, so the hand closes *over* the part.
+
+Which is the point: **"is 31 mm too thick to hold" is not a question a viewport
+can answer.** It is the question the desk exists to answer, and until now the
+only way to ask it was to print the thing.
+
+Each part declares how it wants to be met. The enclosures are `grip` — tilted
+into the hollow of the palm, lens reaching past the fingertips. The carrier board
+is `flat`, because a bare PCB is something you present, not something you hold.
+
+It is the same event stream as the table, so it is not a separate viewer: the
+part in your hand is **the part the bench says you are attending to**, and the
+glow tracks measured effort — amber below the threshold, exactly like the
+guardrail on the table.
+
+| Key | Effect |
+|---|---|
+| `1` `2` `3` | Shell A / Shell B / carrier board |
+| `←` `→` `↑` `↓` | rotate · tilt in the palm |
+| `d` `w` `o` `h` | dimensions · wireframe · fingers-in-front · hand skeleton |
+| `[` `]` | calibrate knuckle span, if the scale looks off |
+| `f` | freeze tracking |
+
+**Geometry is parametric, in millimetres, from the same numbers as the STEP
+file** — no mesh assets, and no WebGL or Three.js either. `web/cad.js` is a
+painter's-algorithm renderer over 2D canvas: silhouette outlines resolved
+per-face so a rib on the far side can't paint through the body, Newell normals
+because chamfered corners make the three-point cross product meaningless, and
+decals depth-sorted on their host's axis so the display glass doesn't vanish
+under the top face it sits on.
+
+Only the hand tracker is fetched from the network (MediaPipe Tasks Vision). When
+it can't be — no webcam, blocked CDN, venue wifi — the page falls back to a
+simulated hand driven by the identical palm frame, so the demo degrades instead
+of dying. Force it with `/hold?sim=1`.
 
 ---
 
@@ -194,7 +249,8 @@ Muse ──┬─ Mind Monitor (OSC/UDP) ──┐
                                                             │
 Webcam ──▶ gesture_server.py ──ws:8765──▶ GestureBridge ─────┤
                                                             ├──▶ /ws ──▶ desk view
-Prism ──▶ objects + hand position ──▶ zone mapping ──────────┤          └▶ control view
+Prism ──▶ objects + hand position ──▶ zone mapping ──────────┤          ├▶ control view
+                                                            │          └▶ /hold (CAD in hand)
                                                             │
                                               ProjectAgent ◀─┘
                                                     └──▶ Boxic (decisions + versions)
@@ -214,6 +270,8 @@ backend/agent.py           the effort gate
 backend/server.py          WebSocket + REST
 gesture/                   MediaPipe thumbs up/down (teammate's module)
 web/                       control view
+web/cad.js                 parametric CAD geometry + 2D-canvas renderer
+web/hold.js                hand tracking, palm frame, finger occlusion
 ```
 
 Run both processes for the full loop:

@@ -1,0 +1,173 @@
+/* "Hold it" view. Shares the projected-light palette from style.css; only the
+   things the camera page needs live here. */
+
+.hold-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 320px;
+  gap: 1px;
+  background: var(--line);
+  min-height: 0;
+}
+
+.mode {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+.mode.tracking { color: var(--focus); }
+.mode.searching { color: var(--warn); }
+.mode.simulated { color: var(--flag); }
+.mode.starting { color: var(--dim); }
+
+/* ------------------------------------------------------------ the project */
+
+.project { margin-bottom: 20px; }
+.project-name { font-size: 15px; font-weight: 550; margin-bottom: 5px; }
+.project-desc { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+
+.rail-title {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--dim);
+  margin-bottom: 10px;
+}
+.rail-title span { text-transform: none; letter-spacing: 0; color: var(--dim); }
+
+.rail { display: flex; flex-direction: column; gap: 9px; margin-bottom: 16px; }
+
+.card {
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 13px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.2s;
+}
+.card:hover { border-color: var(--focus-dim); }
+.card.on {
+  border-color: var(--focus);
+  background: #12211f;
+  box-shadow: 0 0 0 1px var(--focus-dim), 0 6px 24px -12px var(--focus);
+}
+
+.card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+.card-label { font-size: 13.5px; font-weight: 550; }
+.card-key {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.card.on .card-key { color: var(--focus); border-color: var(--focus-dim); }
+.card-file { font-family: var(--mono); font-size: 10.5px; color: var(--focus); margin-bottom: 6px; }
+.card p { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-bottom: 8px; }
+.card-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+}
+.mount { border-radius: 999px; padding: 2px 7px; border: 1px solid var(--line); }
+.mount.grip { color: var(--focus); border-color: var(--focus-dim); }
+.mount.flat { color: var(--flag); border-color: #3b2f5c; }
+
+.follow {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 11.5px; color: var(--muted); cursor: pointer;
+  border-top: 1px solid var(--line); padding-top: 14px;
+}
+.follow input { accent-color: var(--focus); margin-top: 2px; }
+
+/* ------------------------------------------------------------- the camera */
+
+.stage-wrap {
+  background: var(--bg);
+  padding: 18px 22px 20px;
+  display: flex; flex-direction: column; gap: 12px; min-height: 0;
+}
+.stage-head { display: flex; align-items: baseline; justify-content: space-between; }
+.stage-head h2 { font-size: 13px; font-weight: 550; letter-spacing: 0.02em; }
+.stage-head p { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 10%, #12161d 0%, #08090c 70%);
+}
+.viewport video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.readout {
+  position: absolute; left: 14px; bottom: 12px;
+  display: flex; gap: 14px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  background: rgba(8, 9, 12, 0.62);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 11px;
+  pointer-events: none;
+}
+
+.flash {
+  position: absolute; left: 50%; top: 18px; transform: translate(-50%, -14px);
+  font-family: var(--mono); font-size: 13px; letter-spacing: 0.04em;
+  background: rgba(8, 9, 12, 0.85);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 18px;
+  opacity: 0; transition: opacity 0.25s, transform 0.25s;
+  pointer-events: none;
+}
+.flash.show { opacity: 1; transform: translate(-50%, 0); }
+
+.scale-note { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.scale-note kbd {
+  font-family: var(--mono); font-size: 10px;
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--text);
+}
+
+/* --------------------------------------------------------------- the pose */
+
+.control { margin-bottom: 14px; }
+.control label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11px; color: var(--muted); margin-bottom: 6px;
+}
+.control .hint { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+.control input[type=range] { width: 100%; accent-color: var(--focus); }
+
+.toggles {
+  display: flex; flex-direction: column; gap: 8px;
+  border-top: 1px solid var(--line); padding-top: 14px; margin-bottom: 16px;
+}
+.toggles label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--muted); cursor: pointer;
+}
+.toggles input { accent-color: var(--focus); }
+.toggles kbd {
+  margin-left: auto; font-family: var(--mono); font-size: 10px;
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--dim);
+}
+
+.focus-line {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11.5px; color: var(--muted);
+  border-top: 1px solid var(--line); padding-top: 14px; margin-bottom: 16px;
+}
+.focus-line strong { color: var(--focus); font-weight: 550; }
+
+@media (max-width: 1100px) {
+  .hold-main { grid-template-columns: 1fr; grid-auto-rows: min-content; }
+  .viewport { min-height: 60vh; }
+}
