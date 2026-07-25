@@ -1,0 +1,68 @@
+name: Session task
+description: Claim a bounded task before changing files.
+title: "[task] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GitHub is the coordination record. Claim the task and expected files
+        here before opening a worktree or branch.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - web
+        - backend
+        - EEG
+        - gesture
+        - desk vision
+        - deployment
+        - documentation
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User-visible outcome
+      description: What will be observably better when this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the checks or behaviors that prove completion.
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files claimed
+      description: List every file or directory this session expects to edit.
+    validations:
+      required: true
+  - type: input
+    id: base
+    attributes:
+      label: Intended base branch
+      description: Confirm this from GitHub, not Netlify.
+    validations:
+      required: true
+  - type: textarea
+    id: overlap
+    attributes:
+      label: Related or overlapping work
+      description: Link related issues and PRs, or write "None found".
+    validations:
+      required: true
+  - type: checkboxes
+    id: setup
+    attributes:
+      label: Session setup
+      options:
+        - label: I fetched the remote and inspected open PRs.
+          required: true
+        - label: I will use a dedicated worktree and isolated branch.
+          required: true
