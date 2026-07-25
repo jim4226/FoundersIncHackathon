@@ -103,6 +103,9 @@ class Contribution:
     status: str                   # proposed | merged | challenged | rejected
     created_at: float
     artifact_id: str | None = None
+    # Which design on the table this decision was about. Distinct from
+    # artifact_id: artifacts are files, variants are the physical options.
+    variant_id: str | None = None
     agent_response: str | None = None
 
     def to_dict(self) -> dict:
@@ -172,6 +175,22 @@ class ProjectStore:
             target.version += 1
             return target
 
+    def revert_variant(self, variant_id: str) -> Variant | None:
+        """Send a design back to the drawing board — one step back in its
+        lifecycle (design -> candidate -> promoted). A considered thumbs-down
+        pulls the design out of review and marks it for rework, undoing the last
+        version bump so the record shows it regressed rather than advanced.
+        """
+        with self._lock:
+            target = self.variant(variant_id)
+            if target is None:
+                return None
+            target.status = "redesign"
+            if target.version > 1:
+                target.version -= 1
+            target.notes.append("Rejected while focused — sent back to design.")
+            return target
+
     # ----------------------------------------------------------- mutation
 
     def add_contribution(
@@ -182,6 +201,7 @@ class ProjectStore:
         effort: float | None,
         flagged: bool,
         artifact_id: str | None = None,
+        variant_id: str | None = None,
         status: str = "proposed",
     ) -> Contribution:
         with self._lock:
@@ -197,6 +217,7 @@ class ProjectStore:
                 status=status,
                 created_at=time.time(),
                 artifact_id=artifact_id,
+                variant_id=variant_id,
             )
             self.contributions.append(contribution)
             return contribution

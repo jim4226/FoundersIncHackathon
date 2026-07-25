@@ -5,10 +5,17 @@ numpy>=1.26
 scipy>=1.13
 python-osc>=1.9
 anthropic>=0.40
-# desk vision, shared by the overhead webcam and a phone paired by QR code
+
+# The gesture, desk and phone bridges are WebSocket clients; without this they
+# fail at connect time and surface only as "disconnected (ModuleNotFoundError)".
+websockets>=13.0
+
+# Desk object detection, shared by the overhead webcam (desk/desk_server.py)
+# and a phone paired by QR code (backend/phone.py).
 opencv-python>=4.9
-websockets>=12.0
-# the pairing QR itself: pure python, no dependencies of its own
+
+# The pairing QR itself: pure python, no dependencies of its own.
 segno>=1.6
+
 # Only needed for EEG_SOURCE=brainflow. Native BLE; dongles deprecated in 5.22.0.
 brainflow>=5.22.2

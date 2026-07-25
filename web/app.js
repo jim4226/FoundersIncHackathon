@@ -258,8 +258,13 @@ function connect() {
       const verb = msg.vote === 'approve' ? 'Approved' : 'Rejected';
       const eff = msg.effort === null ? 'unmeasured' : Math.round(msg.effort);
       flashVariant(msg.variant.id, msg.vote, msg.binding);
-      toast(msg.binding
-        ? `${verb} ${msg.variant.label} — effort ${eff}, ${msg.decisive ? 'merged' : 'staged for review'}.`
+      let outcome;
+      if (msg.reverted) outcome = `sent back to design (v${msg.reverted.version}) — back to the drawing board`;
+      else if (msg.promoted) outcome = 'promoted to main';
+      else if (msg.binding) outcome = 'staged for review';
+      else outcome = null;
+      toast(outcome
+        ? `${verb} ${msg.variant.label} — effort ${eff}, ${outcome}.`
         : `${verb} ${msg.variant.label} — but effort ${eff}. Held for review, not merged.`);
       latest.variants = msg.project.variants;
       (msg.project.contributions || []).slice(-1).forEach((c) => renderEntry(c, null));

@@ -156,10 +156,12 @@ def handle_bench_message(msg):
             else:
                 set_flash(f"HELD - {label} - you were diffuse", C_HOLD)
         else:  # reject
-            if msg.get("binding"):
-                set_flash(f"REJECTED - {label}", C_REJECT)
+            if msg.get("reverted"):
+                set_flash(f"REJECTED - {label} - back to the drawing board", C_REJECT)
+            elif msg.get("binding"):
+                set_flash(f"REJECTED - {label} - staged", C_REJECT)
             else:
-                set_flash(f"REJECTED - {label} - held for review", C_HOLD)
+                set_flash(f"HELD - {label} - you were diffuse", C_HOLD)
     elif t == "vote_unresolved":
         set_flash("no design in focus", C_NEUTRAL)
 

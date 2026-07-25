@@ -150,7 +150,8 @@ diffuse → locked 15 s     |     re-engaged → unlocked 6 s
 | Screen | URL | Who looks at it |
 |---|---|---|
 | **Desk** | `/desk` | The audience. Live camera of the table with the overlay drawn on top. |
-| **Control** | `/` | You. Effort breakdown, history, agent console, stage controls, the pairing QR. |
+| **Control** | `/` | You. Effort breakdown, agent console, stage controls, the pairing QR. |
+| **Record** | `/project` | The payoff. What the session produced: decision log, designs, talk-to-your-project. |
 | **Phone** | `/phone` | Nobody — it's propped over the desk being a camera. |
 
 We have no Prism SDK, so `desk/desk_server.py` does the seeing half with a
@@ -300,6 +301,7 @@ gesture/                   MediaPipe thumbs up/down (teammate's module)
 desk/                      desk camera + object detection
 web/index.html             control view
 web/desk.html              desk view (second screen)
+web/project.html           the record — decision log + talk to your project
 web/phone.html             phone view (what the QR code opens)
 ```
 

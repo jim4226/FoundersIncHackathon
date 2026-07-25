@@ -55,6 +55,20 @@ consequence for the build.
 Be specific and technical. Reference real artifacts and part numbers from the history. \
 Never pad. Engineers are reading this."""
 
+ANSWER_PROMPT = """You are the engineering agent for a hardware project, answering \
+questions about it. You have the full record: CAD, PCB, firmware, simulation and BOM \
+artifacts, the design variants on the bench, and every decision anyone recorded.
+
+Each decision carries an `effort` score from 0-100, measured from the author's EEG at \
+the moment they wrote it, and each design variant carries `attention` -- the measured \
+seconds the team actually spent looking at it. Use both. When you summarise, say which \
+decisions were considered and which were made while the author was diffuse, and which \
+option genuinely got looked at rather than merely talked about. That distinction is the \
+whole reason this record is worth more than a chat log.
+
+Answer directly and concretely, in a few short paragraphs. Do not modify anything -- \
+this is a read. Do not pad or flatter. Engineers are reading this."""
+
 
 def _regime(effort: float | None, flagged: bool) -> str:
     label = classify_effort(effort, flagged)
@@ -87,6 +101,54 @@ class ProjectAgent:
             except Exception:  # noqa: BLE001 - offline mode is a valid state
                 self._client = None
                 self.mode = "offline"
+
+    def answer(self, question: str) -> dict:
+        """Read the project and answer. Never writes, never gated.
+
+        Talking to the project is the read path, and reads are not gated on
+        effort: someone who has lost the thread asking "walk me through this" is
+        the system working, not a lapse to be challenged. Nor does the question
+        become a project decision -- recording every question as a change would
+        corrupt the exact history this is all built to keep.
+        """
+        if self._client is not None:
+            try:
+                text = self._answer_live(question)
+            except Exception as exc:  # noqa: BLE001 - never break the demo
+                text = self._answer_offline(question) + f"\n\n_(offline fallback: {type(exc).__name__})_"
+        else:
+            text = self._answer_offline(question)
+        return {"regime": "ANSWER", "text": text, "acted": False,
+                "effort": None, "flagged": False}
+
+    def _answer_live(self, question: str) -> str:
+        response = self._client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=ANSWER_PROMPT,
+            messages=[{"role": "user", "content":
+                       f"{self.store.history_for_agent()}\n\nQuestion: {question}"}],
+        )
+        return "".join(b.text for b in response.content if b.type == "text").strip()
+
+    def _answer_offline(self, question: str) -> str:
+        stats = self.store.stats()
+        lines = [
+            f"{self.store.name} — {self.store.description}", "",
+            f"{stats['totalContributions']} recorded decisions, {stats['merged']} merged, "
+            f"{stats['challenged']} challenged. Average operator effort {stats['averageEffort']}.",
+            "",
+            "Designs on the table:",
+        ]
+        for v in self.store.variants:
+            lines.append(
+                f"  · {v.label} (v{v.version}, {v.status}) — "
+                f"{v.attention_seconds:.0f}s of measured attention. {v.summary}"
+            )
+        considered = max(self.store.variants, key=lambda v: v.attention_seconds, default=None)
+        if considered and considered.attention_seconds > 0:
+            lines += ["", f"Most considered: {considered.label}, by measured dwell."]
+        return "\n".join(lines)
 
     def respond(self, message: str, effort: float | None, flagged: bool) -> dict:
         regime = _regime(effort, flagged)
