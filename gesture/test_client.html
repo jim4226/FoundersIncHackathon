@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gesture vote — test client</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 0;
+           display: grid; place-items: center; min-height: 100vh;
+           background: #0e0e12; color: #eee; transition: background .25s; }
+    #card { text-align: center; }
+    #vote { font-size: clamp(3rem, 18vw, 12rem); font-weight: 800;
+            letter-spacing: -.02em; }
+    #meta { opacity: .6; font-size: 1rem; margin-top: .5rem; }
+    #status { position: fixed; top: 1rem; left: 1rem; font-size: .85rem;
+              opacity: .6; }
+    body.approve { background: #06331d; }
+    body.reject  { background: #3a0d12; }
+    #log { position: fixed; bottom: 1rem; left: 1rem; right: 1rem;
+           font-family: ui-monospace, monospace; font-size: .75rem;
+           opacity: .5; max-height: 30vh; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div id="status">connecting…</div>
+  <div id="card">
+    <div id="vote">🖐️</div>
+    <div id="meta">waiting for a gesture</div>
+  </div>
+  <div id="log"></div>
+  <script>
+    const url = "ws://localhost:8765";
+    const $vote = document.getElementById("vote");
+    const $meta = document.getElementById("meta");
+    const $status = document.getElementById("status");
+    const $log = document.getElementById("log");
+    let clearTimer;
+
+    function connect() {
+      const ws = new WebSocket(url);
+      ws.onopen = () => ($status.textContent = "connected ✓ " + url);
+      ws.onclose = () => {
+        $status.textContent = "disconnected — retrying…";
+        setTimeout(connect, 1000);
+      };
+      ws.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        $log.textContent = e.data + "\n" + $log.textContent;
+        if (d.type !== "design_vote") return;
+        document.body.className = d.vote;
+        $vote.textContent = d.vote === "approve" ? "👍" : "👎";
+        $meta.textContent = `${d.vote.toUpperCase()} · conf ${d.confidence} · via ${d.source}`;
+        clearTimeout(clearTimer);
+        clearTimer = setTimeout(() => {
+          document.body.className = "";
+          $vote.textContent = "🖐️";
+          $meta.textContent = "waiting for a gesture";
+        }, 1500);
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>

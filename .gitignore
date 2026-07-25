@@ -1,0 +1,11 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# mediapipe model bundle (downloaded via curl, see gesture/README.md)
+*.task
+
+# os
+.DS_Store

@@ -1,0 +1,3 @@
+mediapipe==0.10.21
+opencv-python==4.11.0.86
+websockets==15.0.1
