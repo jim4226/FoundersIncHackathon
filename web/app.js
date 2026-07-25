@@ -19,6 +19,43 @@ const nodes = {
 
 let latest = { effort: null, attention: null, variants: [] };
 const entries = new Map();
+const hostedStatic = location.hostname.endsWith('.netlify.app')
+  || new URLSearchParams(location.search).has('replay');
+
+let replayMode = false;
+let replayTimer = null;
+let reconnectTimer = null;
+let socketHadMessage = false;
+
+const replay = {
+  effort: 72,
+  gaze: -0.65,
+  attentionSince: Date.now(),
+  lastTick: Date.now(),
+  flagUntil: 0,
+  saccades: 0,
+  sequence: 1,
+  variants: [
+    {
+      id: 'replay-shell-a',
+      label: 'Shell A',
+      position: -0.65,
+      summary: 'Wraparound grip, 31 mm thick, single-shot mould, 2 mm walls.',
+      version: 1,
+      status: 'candidate',
+      attention_seconds: 0,
+    },
+    {
+      id: 'replay-shell-b',
+      label: 'Shell B',
+      position: 0.65,
+      summary: 'Slab back with vented fin, 27 mm thick, side-action tool required.',
+      version: 1,
+      status: 'candidate',
+      attention_seconds: 0,
+    },
+  ],
+};
 
 /* ------------------------------------------------------------- rendering */
 
@@ -167,12 +204,211 @@ function toast(message) {
   toastTimer = setTimeout(() => nodes.flagToast.classList.remove('show'), 3200);
 }
 
+/* ---------------------------------------------------------- hosted replay */
+
+function replayZoneAt(position) {
+  const active = replay.variants.filter((v) => v.status !== 'archived');
+  const nearest = active.length
+    ? active.reduce((best, variant) =>
+      Math.abs(variant.position - position) < Math.abs(best.position - position)
+        ? variant : best)
+    : null;
+  const distance = nearest ? Math.abs(nearest.position - position) : 1;
+  return nearest && distance < 0.45 ? nearest.id : null;
+}
+
+function replayAttention() {
+  const zone = replayZoneAt(replay.gaze);
+  const dwell = zone ? (Date.now() - replay.attentionSince) / 1000 : 0;
+
+  return {
+    position: replay.gaze,
+    zone,
+    selected: zone && dwell >= 1.2 ? zone : null,
+    confidence: zone ? Math.min(1, 0.45 + dwell / 2) : 0,
+    dwell,
+    saccades: replay.saccades,
+  };
+}
+
+function replayEffort() {
+  const normalized = replay.effort / 100;
+  return {
+    effort: replay.effort,
+    calibrating: false,
+    calibrationProgress: 1,
+    blinkRate: 26 - 21 * normalized,
+    contactQuality: 1,
+    components: {
+      ocular: replay.effort,
+      cortical: Math.min(100, 42 + replay.effort * 0.55),
+      stillness: 92,
+    },
+  };
+}
+
+function renderReplayTick() {
+  const now = Date.now();
+  const elapsed = Math.min(1, (now - replay.lastTick) / 1000);
+  replay.lastTick = now;
+
+  const attention = replayAttention();
+  const focused = replay.variants.find((v) => v.id === attention.zone);
+  if (focused && attention.confidence > 0.35) {
+    focused.attention_seconds += elapsed;
+  }
+
+  const effort = replayEffort();
+  latest = { effort, attention, variants: replay.variants };
+  renderEffort(effort);
+  renderAttention(attention, replay.variants);
+
+  nodes.sourceKind.textContent = 'replay · hosted';
+  nodes.sourceKind.className = 'signal-value ok';
+  nodes.gesture.textContent = 'demo controls';
+  nodes.gesture.className = 'signal-value ok';
+}
+
+function startReplayMode() {
+  if (replayMode) return;
+  replayMode = true;
+  replay.lastTick = Date.now();
+  nodes.simGaze.value = Math.round(replay.gaze * 100);
+  nodes.simEffort.value = replay.effort;
+  renderReplayTick();
+  replayTimer = setInterval(renderReplayTick, 400);
+  toast('Hosted replay mode — no local hardware required.');
+}
+
+function stopReplayMode() {
+  if (!replayMode) return;
+  replayMode = false;
+  clearInterval(replayTimer);
+  replayTimer = null;
+  toast('Live bench connected.');
+}
+
+function setReplayGaze(value) {
+  const next = Math.max(-1, Math.min(1, Number(value)));
+  const previousZone = replayZoneAt(replay.gaze);
+  const nextZone = replayZoneAt(next);
+  if (nextZone !== previousZone) {
+    replay.saccades += 1;
+    replay.attentionSince = Date.now();
+  } else if (Math.abs(next - replay.gaze) > 0.08) {
+    replay.saccades += 1;
+  }
+  replay.gaze = next;
+}
+
+function replayContribution(body, status = 'merged', flagged = false) {
+  const contribution = {
+    id: `replay-${replay.sequence++}`,
+    author: 'you',
+    body,
+    kind: 'decision',
+    effort: replay.effort,
+    flagged,
+    label: flagged ? 'flagged' : labelFor(replay.effort),
+    status,
+  };
+  renderEntry(contribution, null);
+  return contribution;
+}
+
+function promoteReplayVariant(variantId) {
+  const target = replay.variants.find((v) => v.id === variantId);
+  if (!target) return { error: 'unknown variant' };
+  if (target.status === 'promoted') {
+    toast(`${target.label} is already promoted.`);
+    return target;
+  }
+
+  replay.variants.forEach((variant) => {
+    variant.status = variant.id === variantId ? 'promoted' : 'archived';
+  });
+  target.version += 1;
+  replayContribution(`Promoted ${target.label} to the main branch.`, 'merged', true);
+  renderReplayTick();
+  toast(`${target.label} promoted to main.`);
+  return target;
+}
+
+function replayPost(path, body) {
+  if (path === '/api/sim') {
+    if (body.gaze !== undefined) setReplayGaze(body.gaze);
+    if (body.effort !== undefined) {
+      replay.effort = Math.round(Math.max(0, Math.min(1, Number(body.effort))) * 100);
+    }
+    renderReplayTick();
+    return { effort: replay.effort, gaze: replay.gaze };
+  }
+
+  if (path === '/api/sim/blink') {
+    replay.flagUntil = Date.now() + 8000;
+    toast('Double-blink — deliberate flag recorded.');
+    return { ok: true };
+  }
+
+  if (path === '/api/sim/clench') {
+    const attention = replayAttention();
+    if (!attention.zone) {
+      toast('Confirm ignored — look at a design first.');
+      return { error: 'no active design' };
+    }
+    return promoteReplayVariant(attention.zone);
+  }
+
+  if (path === '/api/agent') {
+    const flagged = Date.now() < replay.flagUntil;
+    const regime = flagged || replay.effort >= HIGH
+      ? 'CONSIDERED'
+      : replay.effort < LOW ? 'DIFFUSE' : 'REVIEW';
+    const status = regime === 'DIFFUSE' ? 'challenged' : regime === 'REVIEW' ? 'proposed' : 'merged';
+    const contribution = replayContribution(body.message, status, flagged);
+    const agent = {
+      regime,
+      text: regime === 'DIFFUSE'
+        ? 'Held for review. Which constraint matters most here: thermal, cost, or lead time?'
+        : regime === 'REVIEW'
+          ? 'Recorded as a proposal. Confirm the affected artifact before merging.'
+          : 'Recorded as considered intent and added to the project history.',
+    };
+    renderEntry(contribution, agent);
+    return { contribution, agent };
+  }
+
+  const match = path.match(/^\/api\/variants\/([^/]+)\/promote$/);
+  if (match) return promoteReplayVariant(match[1]);
+  return { error: `unsupported replay action: ${path}` };
+}
+
 /* ------------------------------------------------------------- transport */
 
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  if (hostedStatic) {
+    startReplayMode();
+    return;
+  }
+
+  socketHadMessage = false;
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  let ws;
+  try {
+    ws = new WebSocket(`${protocol}://${location.host}/ws`);
+  } catch (_error) {
+    startReplayMode();
+    return;
+  }
+
+  const fallbackTimer = setTimeout(() => {
+    if (!socketHadMessage) startReplayMode();
+  }, 1800);
 
   ws.onmessage = (event) => {
+    socketHadMessage = true;
+    clearTimeout(fallbackTimer);
+    stopReplayMode();
     const msg = JSON.parse(event.data);
 
     if (msg.type === 'tick') {
@@ -233,15 +469,24 @@ function connect() {
     }
   };
 
-  ws.onclose = () => setTimeout(connect, 1200);
+  ws.onerror = () => ws.close();
+  ws.onclose = () => {
+    clearTimeout(fallbackTimer);
+    if (!socketHadMessage) startReplayMode();
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, replayMode ? 5000 : 1200);
+  };
 }
 
 async function post(path, body) {
+  if (replayMode) return replayPost(path, body || {});
+
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   });
+  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
   return res.json();
 }
 

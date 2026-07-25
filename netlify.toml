@@ -1,0 +1,11 @@
+[build]
+  publish = "web"
+
+# FastAPI serves these files from /static locally. On Netlify the publish
+# directory is already web/, so keep the same browser URLs and rewrite them to
+# the files at the publish root.
+[[redirects]]
+  from = "/static/*"
+  to = "/:splat"
+  status = 200
+  force = true
