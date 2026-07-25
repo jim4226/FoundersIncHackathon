@@ -353,3 +353,62 @@ main {
   main { grid-template-columns: 1fr; }
   .panel { max-height: 400px; }
 }
+
+
+/* --------------------------------------------------- hold it (web/hold.html)
+   The camera page is drawn in the Boxic Surface language. Rather than restyle
+   six pages to match, the Boxic tokens are declared on that page's own body
+   class, so the shared chrome (.bar, .panel, .signal-value, .provenance)
+   re-reads in Boxic there and nothing else in the app moves.
+
+   Literal hexes, not aliases onto the teal palette, because hold.js paints the
+   same colours into a 2D canvas and a canvas cannot read custom properties --
+   aliasing would let the chrome and the render drift apart. */
+
+body.hold-page {
+  --ink: #0C0E10;
+  --cream: #F2EDE4;
+  --cream-dim: rgba(242, 237, 228, 0.62);
+  --cream-faint: rgba(242, 237, 228, 0.34);
+  --blue: #A9C7D6;
+  --blue-line: rgba(169, 199, 214, 0.30);
+  --red: #FF7454;
+  --yellow: #F4B52A;
+  --ok: #8FBF9F;
+  --f-display: 'Funnel Display', 'Helvetica Neue', Arial, sans-serif;
+  --f-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.22, .61, .36, 1);
+
+  /* the names the shared chrome already uses, remapped for this page only */
+  --bg: #000000;
+  --panel: rgba(0, 0, 0, 0.90);
+  --panel-2: rgba(169, 199, 214, 0.06);
+  --line: var(--blue-line);
+  --text: var(--cream);
+  --muted: var(--cream-dim);
+  --dim: var(--cream-faint);
+  --focus: var(--blue);
+  --focus-dim: var(--blue-line);
+  --warn: var(--yellow);
+  --danger: var(--red);
+  --flag: var(--red);
+  --mono: var(--f-mono);
+
+  font: 12px/1.5 var(--f-mono);
+  letter-spacing: 0.01em;
+}
+
+/* Cross-view link. Reads teal in the app, Boxic inside .hold-page. */
+.back {
+  font-size: 11px; letter-spacing: 0.06em; color: var(--muted);
+  text-decoration: none; border: 1px solid var(--line);
+  padding: 5px 10px; white-space: nowrap;
+}
+.back:hover { color: var(--text); border-color: var(--focus); }
+
+/* Above the breakpoint only: hold.js sizes its canvas from the element box, so
+   the surface has to be bounded or the canvas lands below the fold. Below it
+   the three columns stack and the page must stay free to scroll. */
+@media (min-width: 1101px) {
+  body.hold-page { height: 100vh; overflow: hidden; }
+}

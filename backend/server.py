@@ -511,6 +511,11 @@ if WEB_DIR.exists():
         """Phone view — what the QR code opens. Streams the desk to the bench."""
         return FileResponse(WEB_DIR / "phone.html")
 
+    @app.get("/hold")
+    def hold_view() -> FileResponse:
+        """Hold it — the CAD part rendered at 1:1 into the operator's hand."""
+        return FileResponse(WEB_DIR / "hold.html")
+
 
 def main() -> None:
     import argparse
