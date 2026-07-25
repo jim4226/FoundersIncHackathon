@@ -21,23 +21,23 @@
   to = "/:splat"
   status = 200
 
-# The front door is the interface itself -- Boxic Surface, running its demo. The
-# explainer moved to /about, for someone who wants the argument rather than the
-# product.
+# The front door is the landing page: it says what this is, points at the
+# simulated demo anyone can open, and links the recording of the hardware run --
+# which is the one thing a static host cannot give you live.
 [[redirects]]
   from = "/"
-  to = "/surface.html"
+  to = "/landing.html"
   status = 200
   force = true
 
 [[redirects]]
-  from = "/surface"
-  to = "/surface.html"
+  from = "/about"
+  to = "/landing.html"
   status = 200
 
 [[redirects]]
-  from = "/about"
-  to = "/landing.html"
+  from = "/surface"
+  to = "/surface.html"
   status = 200
 
 [[redirects]]
@@ -58,6 +58,11 @@
 [[redirects]]
   from = "/phone"
   to = "/phone.html"
+  status = 200
+
+[[redirects]]
+  from = "/hold"
+  to = "/hold.html"
   status = 200
 
 # The real bench renders this QR from its own LAN address. Nothing on Netlify

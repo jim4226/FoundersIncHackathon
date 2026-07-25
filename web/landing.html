@@ -94,6 +94,32 @@ pre .c { color: var(--dim); }
 
 footer { padding: 32px 0 0; color: var(--dim); font-size: 12.5px; line-height: 1.7; }
 footer a { color: var(--muted); }
+
+.doors { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 34px; }
+@media (max-width: 820px) { .doors { grid-template-columns: 1fr; } }
+.door {
+  display: flex; flex-direction: column; gap: 9px; padding: 20px 21px 18px;
+  border-radius: 13px; text-decoration: none; color: var(--text);
+  background: var(--panel); border: 1px solid var(--line);
+  transition: border-color .2s, background .2s, transform .2s;
+}
+.door:hover { transform: translateY(-2px); }
+.door-tag {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--dim);
+}
+.door-name { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.door p { font-size: 13px; line-height: 1.6; color: var(--muted); }
+.door-go { margin-top: 4px; font-size: 13px; font-weight: 600; }
+
+.door-sim { background: linear-gradient(180deg, rgba(69,224,192,0.07), var(--panel)); }
+.door-sim:hover { border-color: var(--focus); }
+.door-sim .door-tag, .door-sim .door-go { color: var(--focus); }
+
+.door-live { background: linear-gradient(180deg, rgba(255,181,71,0.05), var(--panel)); }
+.door-live:hover { border-color: var(--warn); }
+.door-live .door-tag { color: var(--warn); }
+.door-go.door-pending { color: var(--dim); }
 </style>
 </head>
 <body>
@@ -125,20 +151,51 @@ footer a { color: var(--muted); }
     headband watches the person. Together they turn what happens at a physical workbench
     into a project history an agent can actually reason over.</p>
 
-    <div class="cta">
-      <a class="primary" href="/surface">Boxic Surface <span>the projected table</span></a>
-      <a href="/control">Control view <span>the operator's screen</span></a>
-      <a href="/desk">Desk view <span>camera + overlay</span></a>
-      <a href="/project">The record <span>what a session produced</span></a>
-      <a href="/phone">Phone camera <span>pair by QR</span></a>
+    <!-- Two doors, and they are not the same thing. One you can open right now;
+         the other needs a headband and two cameras on a desk, so it is a
+         recording. Saying which is which is the whole point -- a simulated
+         effort score presented as a measured one would be the single dishonest
+         thing in this project. -->
+    <div class="doors">
+
+      <a class="door door-sim" href="/surface">
+        <span class="door-tag">simulated · open it now</span>
+        <span class="door-name">Boxic Surface</span>
+        <p>The projected table, running the full sequence: surface mapping, object
+        detection, six live files from the Portable Espresso Maker, a physical object
+        linked into the project record, a shared 3D review, a spatial comment, and the
+        project answering a question about itself.</p>
+        <span class="door-go">Open the demo →</span>
+      </a>
+
+      <a class="door door-live" id="live-demo" href="#live-demo">
+        <span class="door-tag">live · on hardware</span>
+        <span class="door-name">The bench itself</span>
+        <p>A Muse headband, an overhead camera and a phone over a real desk. None of
+        that can run on a static host — the live loop is a Python process holding
+        WebSockets open to hardware — so the honest version of "live demo" here is a
+        recording of it running.</p>
+        <span class="door-go door-pending">Video link to come →</span>
+      </a>
+
     </div>
 
-    <p class="note"><b>These are live pages, driven by a simulated bench.</b> The real thing is a
-    Python process on a laptop with a headband and two cameras attached, which no static host
-    can run — so when nothing answers, the pages fall back to a browser-side simulator that
-    speaks the identical event stream. That fallback is the same design rule the backend was
-    built on: nothing downstream knows what produced its events. Run
-    <code>python -m backend.server --https</code> locally and the same files drive real hardware.</p>
+    <div class="cta">
+      <a href="/control">Control view <span>simulated</span></a>
+      <a href="/desk">Desk view <span>simulated</span></a>
+      <a href="/project">The record <span>simulated</span></a>
+      <a href="/hold">Hold it <span>uses your camera</span></a>
+      <a href="/phone">Phone camera <span>needs the bench</span></a>
+    </div>
+
+    <p class="note"><b>Every page on this host is driven by a simulated bench, and says so.</b>
+    The real thing is a Python process on a laptop with a headband and two cameras attached,
+    which no static host can run — so when nothing answers, the pages fall back to a
+    browser-side simulator that speaks the identical event stream. That fallback is the same
+    design rule the backend was built on: nothing downstream knows what produced its events.
+    Run <code>python -m backend.server --https</code> locally and the same files drive real
+    hardware. The two exceptions are <b>Hold it</b>, which uses your own camera for real, and
+    the <b>phone camera</b>, which needs a bench on your network to send frames to.</p>
   </div>
 
   <section>
