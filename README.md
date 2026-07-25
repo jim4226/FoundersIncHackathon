@@ -19,6 +19,7 @@ reason over.
 | Piece | What it does | Status |
 |---|---|---|
 | **Desk view** | Second camera over the desk. Detects whatever you put down and draws the overlay on a second screen. Our own stand-in for Prism. | ✅ Built (`desk/`) |
+| **Phone camera** | Scan a QR code and the phone *becomes* the desk camera. No second webcam. | ✅ Built (`backend/phone.py`) |
 | **Control view** | The operator's screen. Effort breakdown, project history, agent console, stage controls. | ✅ Built |
 | **Operator state** | Muse EEG. Effort level, and a deliberate flag gesture. | ✅ Built and tested |
 | **Gesture** | MediaPipe thumbs-up/down → `design_vote` on `ws://localhost:8765`. | ✅ Built (`gesture/`) |
@@ -144,13 +145,56 @@ diffuse → locked 15 s     |     re-engaged → unlocked 6 s
 
 ---
 
+## The hosted demo
+
+**<https://foundersinchacknight.netlify.app>** — the front end, live, with no
+hardware anywhere near it.
+
+Netlify cannot run the bench: it is a Python process on a laptop holding open
+WebSockets to a headband and two cameras. Deploying the UI alone would put a
+control view on the internet that hangs forever on a dead socket, which is worse
+than deploying nothing. So the pages carry one more event source.
+
+`web/demo.js` speaks the identical `tick` / `desk` / `vote` / `flag` stream the
+server speaks, and the pages consume it without knowing the difference — the
+same rule the backend was built on ("nothing downstream knows whether a
+headband, a phone, or the simulator produced them"), extended one hop further,
+into the browser. It engages **only when nothing answers**: the shim opens the
+real socket first and falls back after 1.4 s of silence, so running the bench
+locally keeps it entirely out of the way. Every page it drives is stamped
+`DEMO`, because a simulated effort score presented as a measured one would be
+the single dishonest thing in this project.
+
+| | |
+|---|---|
+| `?demo=1` | simulate without trying the real socket first |
+| `?live=1` | never simulate — fail exactly like production would |
+
+It is not a video: the stage controls, the arrow keys, the agent box and the
+promote flow all work against the simulator, and left alone it runs a loop that
+makes the argument twice — the same approve, at two different effort levels,
+landing differently.
+
+`netlify.toml` publishes `web/` with no build step. `/static/*` rewrites onto
+the same directory so one set of files works under both servers, and `/` serves
+the explainer rather than the operator console, because someone arriving from a
+link needs to know what they are looking at first.
+
+The one thing the hosted copy cannot do is pair a phone — frames have to reach a
+bench on your LAN. Scan the code there and the phone page opens, camera live,
+and says so.
+
+---
+
 ## Two screens
 
 | Screen | URL | Who looks at it |
 |---|---|---|
+| **Landing** | `/` (hosted) | Anyone arriving from a link. The explainer. Locally, `/` is the control view. |
 | **Desk** | `/desk` | The audience. Live camera of the table with the overlay drawn on top. |
-| **Control** | `/` | You. Effort breakdown, agent console, stage controls. |
+| **Control** | `/` | You. Effort breakdown, agent console, stage controls, the pairing QR. |
 | **Record** | `/project` | The payoff. What the session produced: decision log, designs, talk-to-your-project. |
+| **Phone** | `/phone` | Nobody — it's propped over the desk being a camera. |
 
 We have no Prism SDK, so `desk/desk_server.py` does the seeing half with a
 second webcam and puts the drawing half on a screen instead of a projector. For
@@ -205,12 +249,44 @@ curl -o desk/hand_landmarker.task \
 
 ```bash
 pip install -r requirements.txt
-python -m backend.server          # simulated subject, no hardware needed
-# control view  http://localhost:8000
-# desk view     http://localhost:8000/desk
+python -m backend.server --https  # simulated subject, no hardware needed
+# control view  https://localhost:8000
+# desk view     https://localhost:8000/desk
+# phone camera  scan the QR on the control view
 ```
 
-The desk camera, in its own terminal:
+### The desk camera is a phone
+
+The fastest way to get a camera over the desk is the one already in your
+pocket. The control view shows a QR code; scan it, prop the phone over the
+table, and it starts streaming. The phone sends JPEG frames, the bench runs the
+same background subtraction it runs on a webcam, and the desk view draws the
+same overlay — `backend/phone.py` and `desk/desk_server.py` share one detector
+(`backend/vision.py`), so **nothing downstream can tell which camera it has.**
+
+Two things about that path are worth knowing before you rely on it on stage:
+
+- **It needs HTTPS.** Browsers only hand out the camera in a secure context, and
+  `http://192.168.1.24:8000` is not one. `--https` generates a self-signed
+  certificate naming your current LAN IP (via `openssl`, into `.bench-certs/`).
+  The phone warns once about it, you tap through, and the camera works. Without
+  `--https` the phone page still loads and then tells you exactly why it can't
+  open the camera, rather than showing a black rectangle.
+- **Both cameras can be running.** While a phone is streaming it owns the desk
+  feed; the webcam service takes back over ~2.5 s after the phone drops. So the
+  phone is also the fallback for a webcam that won't open, and vice versa.
+
+Calibration is the same idea as the webcam's `c` key: clear the desk and tap
+**Capture empty desk** on the phone (or the button on the control view).
+If nobody does, the phone self-calibrates a second or so after the picture
+stops moving, so an uncalibrated demo shows something rather than nothing.
+
+The pairing URL carries a token that changes every run — a phone still holding
+an old QR code cannot quietly take over the desk feed mid-demo. Set
+`BENCH_PAIR_TOKEN` to pin it, or `BENCH_HOST` to advertise a different address
+(a tunnel, say) instead of the detected LAN IP.
+
+The overhead webcam, if you'd rather use one, in its own terminal:
 
 ```bash
 python desk/desk_server.py                 # real camera (--camera N to pick one)
@@ -223,7 +299,9 @@ reference automatically.
 
 > **Camera indices matter.** `gesture_server.py` uses camera `0` for the hand and
 > `desk_server.py` uses `1` for the desk. If either grabs the wrong one, pass
-> `--camera N` to the desk service or edit `CAM_INDEX` in the gesture one.
+> `--camera N` to the desk service or edit `CAM_INDEX` in the gesture one. Pairing
+> a phone sidesteps this entirely: it leaves camera `0` to the gesture module and
+> needs no index at all.
 
 With a real Muse:
 
@@ -267,8 +345,9 @@ Muse ──┬─ Mind Monitor (OSC/UDP) ──┐
                                                             │
 Webcam ──▶ gesture_server.py ──ws:8765──▶ GestureBridge ─────┤
                                                             ├──▶ /ws ──▶ desk view
-Prism ──▶ objects + hand position ──▶ zone mapping ──────────┤          └▶ control view
-                                                            │
+Phone ──ws:/ws/phone──┐                                     │          └▶ control view
+                      ├─▶ vision.py ──▶ zone mapping ───────┤
+Desk cam ──ws:8766────┘   (one detector)                    │
                                               ProjectAgent ◀─┘
                                                     └──▶ Boxic (decisions + versions)
 ```
@@ -282,15 +361,23 @@ backend/eeg/attention.py   calibration-free left/right attention
 backend/eeg/sources.py     Mind Monitor / BrainFlow / simulator
 backend/gesture.py         bridge to gesture_server.py votes
 backend/desk.py            bridge to the desk camera, binds objects to variants
+backend/vision.py          desk object detection, shared by both cameras
+backend/phone.py           a phone paired by QR, streaming as the desk camera
+backend/pairing.py         LAN address, pairing token, the QR itself
+backend/tls.py             self-signed cert, so the phone may open its camera
 backend/boxic.py           mapping onto Boxic versions + decisions
 backend/store.py           project, variants, effort-scored history
 backend/agent.py           the effort gate
 backend/server.py          WebSocket + REST
 gesture/                   MediaPipe thumbs up/down (teammate's module)
-desk/                      desk camera: object detection + hand landmarks + hand landmarks
+desk/                      desk camera: object detection + hand landmarks
+web/surface.html           Boxic Surface — the projected table, served at /
+web/landing.html           the explainer, at /about on the hosted copy
+web/demo.js                browser-side bench, for when nothing answers
 web/index.html             control view
 web/desk.html              desk view (second screen)
 web/project.html           the record — decision log + talk to your project
+web/phone.html             phone view (what the QR code opens)
 ```
 
 Run both processes for the full loop:

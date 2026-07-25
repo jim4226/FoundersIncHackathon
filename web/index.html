@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2308090c'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%2345e0c0'/%3E%3C/svg%3E">
 <title>Bench — the workbench that knows what you're looking at</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -100,6 +101,25 @@
         <button id="btn-clench">Jaw clench · confirm</button>
       </div>
     </div>
+
+    <!-- Pair a phone as the desk camera: scan, prop it up, done. -->
+    <div class="stage pairing" id="pairing">
+      <div class="stage-title">Desk camera <span id="pair-source">webcam</span></div>
+      <div class="pair-body">
+        <a class="pair-qr" id="pair-link" target="_blank" rel="noopener">
+          <img id="pair-qr" alt="QR code to pair a phone as the desk camera">
+        </a>
+        <div class="pair-copy">
+          <p id="pair-status" class="pair-status">Scan with a phone to use it as the desk camera.</p>
+          <code id="pair-url">—</code>
+          <p class="pair-warn hidden" id="pair-warn">
+            Served over plain HTTP, so the phone's browser will refuse the camera.
+            Restart with <code>--https</code> and re-scan.
+          </p>
+          <button id="btn-calibrate">Capture empty desk</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- RIGHT: the project -->
@@ -120,6 +140,7 @@
 
 </main>
 
+<script src="/static/demo.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
