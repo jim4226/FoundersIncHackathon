@@ -26,11 +26,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import boxic
 from .agent import ProjectAgent
 from .eeg.attention import LateralAttention
 from .eeg.metrics import EffortEstimator
 from .eeg.sources import SimulatedSource, build_source
-from .store import ProjectStore
+from .gesture import GestureBridge
+from .store import HIGH_EFFORT_THRESHOLD, LOW_EFFORT_THRESHOLD, ProjectStore
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 TICK_HZ = 8.0
@@ -106,9 +108,63 @@ async def _tick_loop() -> None:
         })
 
 
+async def _on_vote(vote: str, payload: dict) -> None:
+    """Route a thumbs-up/down onto whatever the operator is currently attending to.
+
+    The gesture supplies the verdict, the attention estimate supplies the
+    referent, and the effort score decides whether the verdict binds. An approve
+    while focused promotes the design; the same approve while diffuse is
+    recorded and held for review, because nodding along is not deciding.
+    """
+    att = _state.get("attention") or {}
+    effort = (_state.get("effort") or {}).get("effort")
+    target_id = att.get("zone") if att.get("confidence", 0) > 0.35 else None
+    variant = store.variant(target_id) if target_id else None
+
+    if variant is None:
+        await _broadcast({
+            "type": "vote_unresolved", "vote": vote,
+            "reason": "no design was being attended to when the vote landed",
+        })
+        return
+
+    binding = effort is not None and effort >= LOW_EFFORT_THRESHOLD
+    decisive = effort is not None and effort >= HIGH_EFFORT_THRESHOLD
+
+    verb = "Approved" if vote == "approve" else "Rejected"
+    body = (
+        f"{verb} {variant.label} by gesture while attending to it"
+        f" ({payload.get('confidence', 0):.0%} gesture confidence)."
+    )
+    if not binding:
+        body += " Operator was diffuse — held for review rather than merged."
+
+    store.add_contribution(
+        author="you", body=body, kind="decision", effort=effort,
+        flagged=False, artifact_id=None,
+        status="merged" if binding else "challenged",
+    )
+
+    promoted = None
+    if vote == "approve" and decisive:
+        promoted = store.promote_variant(variant.id)
+        attention.set_zones(store.zones())
+
+    await _broadcast({
+        "type": "vote", "vote": vote, "variant": variant.to_dict(),
+        "effort": effort, "binding": binding, "decisive": decisive,
+        "promoted": promoted.to_dict() if promoted else None,
+        "project": store.to_dict(),
+    })
+
+
+gestures = GestureBridge(_on_vote)
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     source.start()
+    gestures.start()
     app.state.tick = asyncio.create_task(_tick_loop())
 
 
@@ -119,6 +175,7 @@ async def _shutdown() -> None:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+    await gestures.stop()
     source.stop()
 
 
@@ -149,6 +206,12 @@ class AgentRequest(BaseModel):
 @app.get("/api/project")
 def get_project() -> dict:
     return store.to_dict()
+
+
+@app.get("/api/boxic/export")
+def boxic_export() -> dict:
+    """The session as a Boxic project document, ready to import."""
+    return boxic.export_document(store)
 
 
 @app.get("/api/state")

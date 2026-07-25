@@ -21,7 +21,22 @@ reason over.
 | **Desk live view** | Prism's overhead camera + projector. Sees what's on the table, recognises objects, projects the UI back down onto the surface. | Needs Prism SDK — see *Open questions* |
 | **Control view** | The screen version of the desk. Lay out what's on it, add design variants, drive the demo. | ✅ Built |
 | **Operator state** | Muse EEG. Effort level, and a deliberate flag gesture. | ✅ Built and tested |
-| **Boxic** | The project backend — GitHub for the physical world. Where the history, variants, BOM and artifacts actually live. | ⚠️ Not yet wired (no access) |
+| **Gesture** | MediaPipe thumbs-up/down → `design_vote` on `ws://localhost:8765`. | ✅ Built (`gesture/`) |
+| **Boxic** | The living project record for hardware. Where history, versions and decisions actually live. | ✅ Mapped (`backend/boxic.py`) — needs one write tool |
+
+### How the three inputs divide the work
+
+This is the answer to "why do you need all of this?", and each part is doing a
+job the others structurally cannot:
+
+> **Gesture** says *what the verdict is.* 👍 approve, 👎 reject.
+> **Attention** says *what it applies to.* A thumbs-up alone doesn't name a design.
+> **Effort** says *whether it binds.* Nodding along is not deciding.
+
+An approve while focused promotes the design. The same approve while diffuse is
+recorded but held for review. That distinction is invisible to a camera and
+trivial for the headband — which is the cleanest statement of why the EEG earns
+its place on the desk.
 
 ---
 
@@ -174,13 +189,15 @@ simulator produced them.
 
 ```
 Muse ──┬─ Mind Monitor (OSC/UDP) ──┐
-       ├─ BrainFlow (native BLE) ───┼──▶ EffortEstimator ──┐
-       └─ Simulator ────────────────┘    LateralAttention ─┴──▶ /ws ──▶ desk view
-                                                                    └──▶ control view
-Prism ──▶ objects + hand position ─────────────────────────────▶ zone mapping
-                                                                       │
-                                                        ProjectAgent ◀──┘
-                                                              └──▶ Boxic
+       ├─ BrainFlow (native BLE) ───┼──▶ EffortEstimator ───┐
+       └─ Simulator ────────────────┘    LateralAttention ──┤
+                                                            │
+Webcam ──▶ gesture_server.py ──ws:8765──▶ GestureBridge ─────┤
+                                                            ├──▶ /ws ──▶ desk view
+Prism ──▶ objects + hand position ──▶ zone mapping ──────────┤          └▶ control view
+                                                            │
+                                              ProjectAgent ◀─┘
+                                                    └──▶ Boxic (decisions + versions)
 ```
 
 That decoupling is the point: the two halves of the team build in parallel, and
@@ -190,11 +207,24 @@ a dead headband degrades the demo instead of ending it.
 backend/eeg/metrics.py     effort score, blink + clench detection
 backend/eeg/attention.py   calibration-free left/right attention
 backend/eeg/sources.py     Mind Monitor / BrainFlow / simulator
+backend/gesture.py         bridge to gesture_server.py votes
+backend/boxic.py           mapping onto Boxic versions + decisions
 backend/store.py           project, variants, effort-scored history
 backend/agent.py           the effort gate
 backend/server.py          WebSocket + REST
+gesture/                   MediaPipe thumbs up/down (teammate's module)
 web/                       control view
 ```
+
+Run both processes for the full loop:
+
+```bash
+python -m backend.server                 # :8000  bench
+python gesture/gesture_server.py         # :8765  votes
+```
+
+The bridge reconnects on its own, so the gesture process can start and stop
+independently without taking the bench down.
 
 ---
 
@@ -213,19 +243,37 @@ plus the flag. Fewer failure modes, stronger story. `LateralAttention.set_zones(
 already takes an arbitrary `{id: position}` map, so this is a small change once
 object positions are available.
 
-**2. Boxic as the backend.** `backend/store.py` is currently in-memory and
-seeded with a fake project. It should be a thin client against Boxic instead:
-variants, versions, history and BOM live there, and Bench writes effort-scored
-contributions into it. The `ProjectStore` interface was kept deliberately narrow
-for this swap.
+**2. Boxic needs one write tool.** Boxic stores a whole project as a JSON
+document in `workspace_projects.data`, with `Version` and `ProjectDecision`
+records inside it. `ProjectDecision` already carries an `origin` field —
+`"conversation" | "manual"` — distinguishing a decision reached by talking to
+the project from one typed in by hand. **Bench is simply a third origin:**
+`"bench"`, a decision reached at the physical desk with the operator's measured
+state attached.
+
+```jsonc
+{
+  "id": "dec_a1b2c3", "authorHandle": "you", "versionId": "ver_var_0006",
+  "title": "Approved Shell A by gesture while attending to it",
+  "origin": "bench",          // ← new value, existing field
+  "effort": 88, "weight": 0.88, "flagged": false   // ← extra keys, no migration
+}
+```
+
+Because `data` is `jsonb`, the extra keys ride along without a schema change —
+anything reading decisions today keeps working. Bench variants map onto Boxic
+`Version` records, carrying `attentionSeconds` (measured dwell), so the record
+shows which option was actually considered rather than only which one won.
+
+`backend/boxic.py` does this mapping now and `GET /api/boxic/export` returns an
+importable document. The only missing piece is on Boxic's side: its MCP server
+currently exposes `list_workspaces`, `list_projects` and `get_project` — all
+read-only. **One `commit_decision` tool taking the shape above closes the loop.**
 
 ---
 
 ## Open questions
 
-- **Boxic access.** Blocked — `add_repo` refuses cross-owner adds on this
-  session and the repo 404s unauthenticated, which is indistinguishable between
-  private and nonexistent. Need its API surface or a session rooted at that repo.
 - **Prism SDK.** No public developer surface documented. Resolve early: can we
   get object detections and project custom content, or do we roll our own
   overhead camera + projector rig?
