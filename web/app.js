@@ -15,6 +15,9 @@ const nodes = {
   flagToast: el('flag-toast'), history: el('history'),
   agentForm: el('agent-form'), agentInput: el('agent-input'), agentSend: el('agent-send'),
   simGaze: el('sim-gaze'), simEffort: el('sim-effort'),
+  pairQr: el('pair-qr'), pairLink: el('pair-link'), pairUrl: el('pair-url'),
+  pairStatus: el('pair-status'), pairWarn: el('pair-warn'), pairSource: el('pair-source'),
+  calibrate: el('btn-calibrate'),
 };
 
 let latest = { effort: null, attention: null, variants: [] };
@@ -167,10 +170,47 @@ function toast(message) {
   toastTimer = setTimeout(() => nodes.flagToast.classList.remove('show'), 3200);
 }
 
+/* --------------------------------------------------------------- pairing */
+
+/* The phone is paired by scanning, and the only feedback the presenter gets
+   that it worked is this panel -- so it reports the two things that actually
+   go wrong: the page not being served over HTTPS (the browser then refuses the
+   camera), and the reference frame never having been captured. */
+
+async function loadPairing() {
+  try {
+    const info = await (await fetch('/api/pair')).json();
+    nodes.pairQr.src = '/api/pair/qr.svg';
+    nodes.pairLink.href = info.url;
+    nodes.pairUrl.textContent = info.url;
+    nodes.pairWarn.classList.toggle('hidden', info.cameraAllowed);
+  } catch {
+    nodes.pairUrl.textContent = 'pairing unavailable';
+  }
+}
+
+function renderPairing(phone, desk) {
+  const live = phone?.live;
+  nodes.pairSource.textContent = live ? 'phone' : (desk?.status === 'connected' ? 'webcam' : 'none');
+  nodes.pairStatus.className = `pair-status${live ? ' on' : ''}`;
+  nodes.calibrate.disabled = !live;
+
+  if (!live) {
+    nodes.pairStatus.textContent = phone?.status === 'connected'
+      ? 'Phone connected — waiting for frames.'
+      : 'Scan with a phone to use it as the desk camera.';
+    return;
+  }
+  nodes.pairStatus.textContent = phone.calibrated
+    ? `Phone streaming · ${phone.objects} object${phone.objects === 1 ? '' : 's'} on the desk.`
+    : 'Phone streaming — clear the desk and capture a reference.';
+}
+
 /* ------------------------------------------------------------- transport */
 
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -187,6 +227,8 @@ function connect() {
       nodes.gesture.textContent = g;
       nodes.gesture.className = 'signal-value ' +
         (g === 'connected' ? 'ok' : g.startsWith('disconnected') ? 'bad' : '');
+
+      renderPairing(msg.phone, msg.desk);
     }
 
     if (msg.type === 'flag') {
@@ -262,6 +304,12 @@ nodes.agentForm.addEventListener('submit', async (e) => {
   }
 });
 
+nodes.calibrate.addEventListener('click', async () => {
+  nodes.calibrate.textContent = 'Capturing…';
+  await post('/api/desk/calibrate');
+  setTimeout(() => { nodes.calibrate.textContent = 'Capture empty desk'; }, 900);
+});
+
 nodes.simGaze.addEventListener('input', (e) => post('/api/sim', { gaze: e.target.value / 100 }));
 nodes.simEffort.addEventListener('input', (e) => post('/api/sim', { effort: e.target.value / 100 }));
 el('btn-blink').addEventListener('click', () => post('/api/sim/blink'));
@@ -281,4 +329,5 @@ document.addEventListener('keydown', (e) => {
   if (map[e.key]) { e.preventDefault(); map[e.key](); }
 });
 
+loadPairing();
 connect();

@@ -7,17 +7,9 @@ that is arguably better: the audience watches the desk and the overlay together
 in one frame, rather than trying to read projected light off a table under stage
 lighting.
 
-Detection is background subtraction against an empty-desk reference, not a
-trained model. That is a deliberate choice: it needs no download, no labels and
-no GPU, it runs at camera rate on a laptop, and it genuinely does not care what
-you put down -- which is the property that matters here. Any object is a blob.
-
-Two heuristics do most of the work:
-
-  * Anything touching the frame border is an arm reaching in, not an object on
-    the desk. Objects get placed within the frame; hands arrive from outside it.
-  * Objects are matched between frames by nearest centroid, so ids stay stable
-    while you slide something around.
+Detection itself lives in `backend/vision.py`, because a phone paired by QR code
+runs the identical algorithm on the identical frames -- see `backend/phone.py`.
+One implementation, two cameras, and the bench cannot tell which one it has.
 
 Run:  python desk/desk_server.py                 # real camera
       python desk/desk_server.py --synthetic     # no camera needed
@@ -30,24 +22,26 @@ import argparse
 import base64
 import json
 import math
+import sys
 import threading
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
 from websockets.sync.server import serve
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from backend import vision  # noqa: E402 - path has to be set before this import
+
 WS_PORT = 8766
 CAM_INDEX = 1          # the DESK camera; gesture_server.py uses 0
-FRAME_W, FRAME_H = 960, 540
-JPEG_QUALITY = 72
-TARGET_FPS = 12
+FRAME_W, FRAME_H = vision.FRAME_W, vision.FRAME_H
+JPEG_QUALITY = vision.JPEG_QUALITY
+TARGET_FPS = vision.TARGET_FPS
 
-MIN_AREA_FRAC = 0.004  # ignore specks
-MAX_AREA_FRAC = 0.30   # ignore whole-frame lighting changes
-DIFF_THRESHOLD = 28
-BORDER_MARGIN = 6      # px; a blob this close to the edge is an arm
-MATCH_RADIUS_FRAC = 0.12
+Tracker = vision.Tracker
+detect = vision.detect
 
 clients, clients_lock = set(), threading.Lock()
 state = {"objects": [], "reference": None, "frame": None}
@@ -84,77 +78,6 @@ def start_ws() -> None:
     with serve(ws_handler, "0.0.0.0", WS_PORT, max_size=8 * 1024 * 1024) as server:
         print(f"[ws] desk broadcasting on ws://localhost:{WS_PORT}")
         server.serve_forever()
-
-
-# ------------------------------------------------------------- detection
-
-class Tracker:
-    """Nearest-centroid matching so an object keeps its id while it moves."""
-
-    def __init__(self):
-        self._next_id = 1
-        self.tracked: list[dict] = []
-
-    def update(self, detections: list[dict], width: int) -> list[dict]:
-        radius = width * MATCH_RADIUS_FRAC
-        unmatched = list(self.tracked)
-        result = []
-
-        for det in detections:
-            best, best_dist = None, radius
-            for prior in unmatched:
-                dist = math.dist(det["centroid"], prior["centroid"])
-                if dist < best_dist:
-                    best, best_dist = prior, dist
-            if best is not None:
-                unmatched.remove(best)
-                det["id"] = best["id"]
-                det["label"] = best["label"]
-            else:
-                det["id"] = f"obj_{self._next_id}"
-                det["label"] = f"Object {self._next_id}"
-                self._next_id += 1
-            result.append(det)
-
-        # Sort left to right so labels read naturally on the desk.
-        result.sort(key=lambda d: d["centroid"][0])
-        self.tracked = result
-        return result
-
-
-def detect(frame: np.ndarray, reference: np.ndarray) -> list[dict]:
-    """Blobs that are present now and were not on the empty desk."""
-    h, w = frame.shape[:2]
-    gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (11, 11), 0)
-    delta = cv2.absdiff(reference, gray)
-    _, mask = cv2.threshold(delta, DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8), iterations=2)
-    mask = cv2.dilate(mask, None, iterations=1)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    frame_area = float(h * w)
-    found = []
-
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if not (MIN_AREA_FRAC * frame_area <= area <= MAX_AREA_FRAC * frame_area):
-            continue
-        x, y, bw, bh = cv2.boundingRect(contour)
-        # A blob running off the edge of the frame is an arm reaching in.
-        if (x <= BORDER_MARGIN or y <= BORDER_MARGIN
-                or x + bw >= w - BORDER_MARGIN or y + bh >= h - BORDER_MARGIN):
-            continue
-        cx, cy = x + bw / 2, y + bh / 2
-        found.append({
-            "centroid": (cx, cy),
-            "bbox": [x, y, bw, bh],
-            "area": area,
-            # Normalised left-to-right position, the axis the EEG resolves.
-            "position": round((cx / w) * 2 - 1, 3),
-            "positionY": round((cy / h) * 2 - 1, 3),
-        })
-
-    return found
 
 
 # ------------------------------------------------------------- synthetic
@@ -222,7 +145,7 @@ def main() -> None:
                 break
             frame = cv2.resize(frame, (FRAME_W, FRAME_H))
 
-        gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (11, 11), 0)
+        gray = vision.to_gray(frame)
 
         # Headless and synthetic runs capture the reference on their own after a
         # moment, so the service is usable without anyone at the keyboard.
@@ -243,13 +166,8 @@ def main() -> None:
                 "calibrated": reference is not None,
                 "width": FRAME_W,
                 "height": FRAME_H,
-                "objects": [
-                    {k: v for k, v in obj.items() if k != "centroid"} | {
-                        "cx": round(obj["centroid"][0], 1),
-                        "cy": round(obj["centroid"][1], 1),
-                    }
-                    for obj in objects
-                ],
+                "origin": "camera",
+                "objects": vision.for_wire(objects),
                 "jpeg": base64.b64encode(buf).decode("ascii"),
             })
 

@@ -264,6 +264,33 @@ main {
 .stage-row.buttons button:hover { border-color: var(--focus); background: #1b212b; }
 .stage-row.buttons button:active { transform: translateY(1px); }
 
+/* -------------------------------------------------------- phone pairing */
+
+.pairing { margin-top: 12px; }
+.pair-body { display: flex; gap: 15px; align-items: flex-start; }
+.pair-qr {
+  flex: none; width: 116px; height: 116px; border-radius: 9px;
+  background: #fff; padding: 5px; display: block; line-height: 0;
+}
+.pair-qr img { width: 100%; height: 100%; display: block; }
+.pair-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.pair-status { font-size: 12.5px; color: var(--muted); }
+.pair-status.on { color: var(--focus); }
+.pair-copy code {
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pair-warn { font-size: 11.5px; color: var(--warn); line-height: 1.45; }
+.pair-warn code { color: var(--warn); font-size: 11px; }
+.pair-copy button {
+  margin-top: auto; padding: 8px 10px; border-radius: 7px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  font-size: 12px; font-family: inherit; transition: border-color .2s, background .2s;
+}
+.pair-copy button:hover { border-color: var(--focus); background: #1b212b; }
+.pair-copy button:disabled { opacity: 0.45; cursor: default; }
+.hidden { display: none; }
+
 /* -------------------------------------------------------------- project */
 
 .agent-form { margin-bottom: 20px; }

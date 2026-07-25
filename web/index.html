@@ -100,6 +100,25 @@
         <button id="btn-clench">Jaw clench · confirm</button>
       </div>
     </div>
+
+    <!-- Pair a phone as the desk camera: scan, prop it up, done. -->
+    <div class="stage pairing" id="pairing">
+      <div class="stage-title">Desk camera <span id="pair-source">webcam</span></div>
+      <div class="pair-body">
+        <a class="pair-qr" id="pair-link" target="_blank" rel="noopener">
+          <img id="pair-qr" alt="QR code to pair a phone as the desk camera">
+        </a>
+        <div class="pair-copy">
+          <p id="pair-status" class="pair-status">Scan with a phone to use it as the desk camera.</p>
+          <code id="pair-url">—</code>
+          <p class="pair-warn hidden" id="pair-warn">
+            Served over plain HTTP, so the phone's browser will refuse the camera.
+            Restart with <code>--https</code> and re-scan.
+          </p>
+          <button id="btn-calibrate">Capture empty desk</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- RIGHT: the project -->

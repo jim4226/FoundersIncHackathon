@@ -145,7 +145,8 @@ function setStatus(node, text, ok) {
 /* ------------------------------------------------------------ transport */
 
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -159,7 +160,11 @@ function connect() {
       objects = msg.objects || [];
       if (msg.width) frameSize = { width: msg.width, height: msg.height };
       if (!msg.calibrated) {
-        banner.innerHTML = 'Clear the desk, then press <span class="accent">c</span> in the camera window to calibrate.';
+        // The two cameras calibrate differently: the webcam has a preview
+        // window with a keyboard behind it, the phone has a button on itself.
+        banner.innerHTML = msg.origin === 'phone'
+          ? 'Clear the desk, then tap <span class="accent">Capture empty desk</span> on the phone.'
+          : 'Clear the desk, then press <span class="accent">c</span> in the camera window to calibrate.';
       }
     }
 
@@ -174,9 +179,10 @@ function connect() {
       setStatus(hud.gesture, msg.gesture?.status ?? 'idle',
         msg.gesture?.status === 'connected');
       const d = msg.desk;
+      const deskLive = d?.status === 'connected' || d?.origin === 'phone';
       setStatus(hud.desk,
-        d ? `${d.status}${d.status === 'connected' ? ` · ${d.objects} obj` : ''}` : 'idle',
-        d?.status === 'connected');
+        d ? `${d.status}${deskLive ? ` · ${d.objects} obj` : ''}` : 'idle',
+        deskLive);
 
       if (feed.hidden === false) {
         const idx = focusedIndex();

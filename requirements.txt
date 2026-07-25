@@ -5,5 +5,10 @@ numpy>=1.26
 scipy>=1.13
 python-osc>=1.9
 anthropic>=0.40
+# desk vision, shared by the overhead webcam and a phone paired by QR code
+opencv-python>=4.9
+websockets>=12.0
+# the pairing QR itself: pure python, no dependencies of its own
+segno>=1.6
 # Only needed for EEG_SOURCE=brainflow. Native BLE; dongles deprecated in 5.22.0.
 brainflow>=5.22.2
