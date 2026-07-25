@@ -54,6 +54,9 @@ p{margin:0}
 a{color:inherit}
 .wrap{max-width:1120px; margin:0 auto; padding:0 22px}
 
+/* The tour button is a button element, not a link -- same shape as the rest. */
+.tour-launch{font-family:var(--disp)}
+
 /* ---------------------------------------------------------------- buttons */
 .btn{
   display:inline-flex; align-items:center; gap:10px; text-decoration:none;
@@ -220,7 +223,7 @@ footer{background:var(--ink); color:#B9B1C6; padding:8px 0 40px; font-size:14px}
 footer a{color:#FFF3E4}
 </style>
 </head>
-<body>
+<body class="tour-landing">
 
 <nav class="nav">
   <div class="nav-in">
@@ -248,6 +251,7 @@ footer a{color:#FFF3E4}
     <div class="launch">
       <a class="btn primary launch-btn" href="/surface"><span class="play">▶</span> Open the demo</a>
       <a class="btn" href="#live">See it on hardware</a>
+      <button class="btn tour-launch" onclick="BenchTour.start()">Take the tour</button>
     </div>
 
     <p class="launch-note">
@@ -444,5 +448,6 @@ python gesture/mock_votes.py</pre>
   </div>
 </footer>
 
+<script src="/static/tour.js"></script>
 </body>
 </html>
