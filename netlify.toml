@@ -21,13 +21,24 @@
   to = "/:splat"
   status = 200
 
-# The front door is the explainer, not the operator console: someone arriving
-# from a link needs to know what they are looking at before they see it.
+# The front door is the interface itself -- Boxic Surface, running its demo. The
+# explainer moved to /about, for someone who wants the argument rather than the
+# product.
 [[redirects]]
   from = "/"
-  to = "/landing.html"
+  to = "/surface.html"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/surface"
+  to = "/surface.html"
+  status = 200
+
+[[redirects]]
+  from = "/about"
+  to = "/landing.html"
+  status = 200
 
 [[redirects]]
   from = "/control"

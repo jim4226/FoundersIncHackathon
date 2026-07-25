@@ -467,6 +467,16 @@ if WEB_DIR.exists():
         """Control view — the operator's screen."""
         return FileResponse(WEB_DIR / "index.html")
 
+    @app.get("/surface")
+    def surface_view() -> FileResponse:
+        """Boxic Surface — the projected table interface."""
+        return FileResponse(WEB_DIR / "surface.html")
+
+    @app.get("/about")
+    def about_view() -> FileResponse:
+        """The explainer, which is the front door on the hosted copy."""
+        return FileResponse(WEB_DIR / "landing.html")
+
     @app.get("/desk")
     def desk_view() -> FileResponse:
         """Desk view — the second screen, camera plus overlay."""
