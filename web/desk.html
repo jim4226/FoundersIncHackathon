@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2308090c'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%2345e0c0'/%3E%3C/svg%3E">
+<title>Bench — desk</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+/* The desk view is the second screen: full-bleed camera with the overlay drawn
+   on top. Everything is sized to be readable from across a room, because the
+   audience is looking at this one, not at the control view. */
+body { overflow: hidden; height: 100vh; }
+
+.desk-stage {
+  position: relative; width: 100vw; height: 100vh;
+  background: #05060a; display: flex; align-items: center; justify-content: center;
+}
+#desk-feed { max-width: 100%; max-height: 100%; display: block; }
+#desk-overlay { position: absolute; pointer-events: none; }
+
+.hud {
+  position: absolute; top: 26px; left: 30px; z-index: 5;
+  display: flex; align-items: flex-end; gap: 26px;
+}
+.hud-effort { font-family: var(--mono); font-size: 76px; line-height: 1; font-weight: 300; }
+.hud-label {
+  font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--muted); padding-bottom: 12px;
+}
+.hud-sub {
+  position: absolute; top: 26px; right: 30px; z-index: 5;
+  text-align: right; font-family: var(--mono); font-size: 12px; color: var(--dim);
+  line-height: 1.7;
+}
+.hud-sub b { color: var(--focus); font-weight: 500; }
+.hud-sub .bad { color: var(--danger); }
+
+.desk-banner {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 5;
+  padding: 20px 30px; font-size: 22px; text-align: center;
+  background: linear-gradient(0deg, rgba(5,6,10,0.94), transparent);
+}
+.desk-banner .accent { color: var(--focus); }
+.desk-banner .warn { color: var(--warn); }
+
+.guard {
+  position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  box-shadow: inset 0 0 160px rgba(255,95,86,0.5);
+  opacity: 0; transition: opacity .4s;
+}
+.guard.on { opacity: 1; }
+
+.waiting {
+  position: absolute; z-index: 6; text-align: center; color: var(--muted);
+  font-size: 17px; line-height: 1.7;
+}
+.waiting code {
+  font-family: var(--mono); color: var(--focus);
+  background: var(--panel); padding: 3px 8px; border-radius: 5px;
+}
+</style>
+</head>
+<body>
+
+<div class="desk-stage">
+  <img id="desk-feed" alt="" hidden>
+  <canvas id="desk-overlay"></canvas>
+
+  <div class="waiting" id="waiting">
+    Waiting for the desk camera…<br>
+    <code>python desk/desk_server.py</code><br>
+    <span style="font-size:14px">or <code>--synthetic</code> to run without one</span>
+  </div>
+
+  <div class="hud">
+    <span class="hud-effort" id="hud-effort">--</span>
+    <span class="hud-label" id="hud-label">calibrating</span>
+  </div>
+
+  <div class="hud-sub">
+    <div>desk <b id="s-desk">—</b></div>
+    <div>gesture <b id="s-gesture">—</b></div>
+    <div>headband <b id="s-eeg">—</b></div>
+  </div>
+
+  <div class="guard" id="guard"></div>
+  <div class="desk-banner" id="banner">Look at a design on the desk.</div>
+</div>
+
+<script src="/static/demo.js"></script>
+<script src="/static/desk.js"></script>
+<script src="/static/tour.js"></script>
+</body>
+</html>

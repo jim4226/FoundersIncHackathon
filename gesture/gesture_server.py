@@ -33,7 +33,8 @@ HOLD_SECONDS   = 0.6      # gesture must be held this long before it fires
 COOLDOWN_SECS  = 2.0      # after firing, ignore new triggers this long
 CAM_INDEX      = 0        # dedicated webcam pointed at the hand
 WS_PORT        = 8765
-MODEL_PATH     = "gesture_recognizer.task"
+MODEL_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "gesture_recognizer.task")  # resolve next to script
 BENCH_WS_URL   = os.environ.get("BENCH_WS_URL", "ws://localhost:8000/ws")
 FLASH_SECS     = 2.5      # how long a vote verdict stays on screen
 
@@ -155,10 +156,12 @@ def handle_bench_message(msg):
             else:
                 set_flash(f"HELD - {label} - you were diffuse", C_HOLD)
         else:  # reject
-            if msg.get("binding"):
-                set_flash(f"REJECTED - {label}", C_REJECT)
+            if msg.get("reverted"):
+                set_flash(f"REJECTED - {label} - back to the drawing board", C_REJECT)
+            elif msg.get("binding"):
+                set_flash(f"REJECTED - {label} - staged", C_REJECT)
             else:
-                set_flash(f"REJECTED - {label} - held for review", C_HOLD)
+                set_flash(f"HELD - {label} - you were diffuse", C_HOLD)
     elif t == "vote_unresolved":
         set_flash("no design in focus", C_NEUTRAL)
 

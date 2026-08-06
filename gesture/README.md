@@ -47,6 +47,18 @@ Keys in the preview window:
 - `a` — force an approve event (stage fallback if the camera misbehaves)
 - `r` — force a reject event
 
+## Camera-free fallback (`mock_votes.py`)
+
+If MediaPipe won't install (no wheel for Python 3.13/3.14) or the camera won't
+open before you present, run the stand-in instead. It speaks the identical
+protocol on the identical port, so the bench can't tell the difference — votes
+still route through attention and effort exactly as a real thumbs-up would.
+
+```bash
+python mock_votes.py            # interactive: a = approve, r = reject, q = quit
+python mock_votes.py --script   # timed approve/reject loop
+```
+
 ## Feedback loop with the bench
 
 When the bench (`backend/server.py`, port 8000) is running, this process also

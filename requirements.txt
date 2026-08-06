@@ -1,0 +1,28 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+numpy>=1.26
+scipy>=1.13
+python-osc>=1.9
+anthropic>=0.40
+
+# The gesture, desk and phone bridges are WebSocket clients; without this they
+# fail at connect time and surface only as "disconnected (ModuleNotFoundError)".
+websockets>=13.0
+
+# Desk object detection, shared by the overhead webcam (desk/desk_server.py)
+# and a phone paired by QR code (backend/phone.py).
+opencv-python>=4.9
+
+# The pairing QR itself: pure python, no dependencies of its own.
+segno>=1.6
+
+# Optional: hand landmarks on whichever camera is watching the desk -- the
+# overhead webcam or a paired phone. Without it both still detect objects, they
+# just cannot report which one your hand is on. Also needs the model:
+#   curl -o desk/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+# On headless Linux: apt-get install libgles2 libegl1
+mediapipe>=0.10.21
+
+# Only needed for EEG_SOURCE=brainflow. Native BLE; dongles deprecated in 5.22.0.
+brainflow>=5.22.2

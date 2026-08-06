@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23000'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23A9C7D6'/%3E%3C/svg%3E">
+<title>Bench — hold it</title>
+<!-- Relative, not absolute: this page has to work both mounted under the bench
+     at /static/hold.html and served straight out of the web/ folder by any
+     static file server, which is how you run it on a laptop with no backend. -->
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/hold.css">
+<link rel="stylesheet" href="/static/fonts.css">
+</head>
+<body class="hold-page">
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>Bench</h1>
+    <span class="sub">Hold it — CAD at 1:1 in your hand</span>
+  </div>
+  <div class="bar-right">
+    <div class="signal">
+      <span class="signal-label">tracking</span>
+      <span class="signal-value"><span id="mode" class="mode starting">starting</span></span>
+    </div>
+    <div class="signal">
+      <span class="signal-label">bench</span>
+      <span class="signal-value" id="bench">connecting</span>
+    </div>
+    <div class="signal">
+      <span class="signal-label">effort</span>
+      <span class="signal-value" id="effort">—</span>
+    </div>
+    <a class="back" href="/surface">← the table</a>
+  </div>
+</header>
+
+<main class="hold-main">
+
+  <!-- LEFT: the project and its parts -->
+  <aside class="panel panel-left">
+    <h2>Project</h2>
+    <div class="project">
+      <div class="project-name" id="project-name">—</div>
+      <p class="project-desc" id="project-desc"></p>
+    </div>
+
+    <h3 class="rail-title">Parts <span>pick one — 1 / 2 / 3</span></h3>
+    <div class="rail" id="rail"></div>
+
+    <label class="follow">
+      <input type="checkbox" id="follow" checked>
+      <span>Follow the bench — hold whatever I'm attending to</span>
+    </label>
+  </aside>
+
+  <!-- CENTRE: the camera -->
+  <section class="stage-wrap">
+    <div class="stage-head">
+      <h2>Your hand</h2>
+      <p id="mode-detail">show your palm to the camera</p>
+    </div>
+
+    <div class="viewport">
+      <video id="cam" playsinline muted></video>
+      <canvas id="stage"></canvas>
+      <div class="flash" id="flash"></div>
+      <div class="readout">
+        <span id="readout-size">—</span>
+        <span id="readout-scale">—</span>
+        <span id="readout-fps">—</span>
+      </div>
+    </div>
+
+    <p class="scale-note">
+      Scale comes from your own knuckle span, so the part is life-size against
+      your fingers. If it looks wrong, calibrate with <kbd>[</kbd> <kbd>]</kbd>.
+    </p>
+  </section>
+
+  <!-- RIGHT: which camera, and how the part sits -->
+  <aside class="panel panel-right">
+    <h2>Camera</h2>
+
+    <div class="control">
+      <label>this view <span class="hint" id="camera-count">—</span></label>
+      <select id="camera" disabled><option>starting…</option></select>
+    </div>
+    <p class="camera-note">
+      This is the <b>hand</b> camera — your laptop lid is the right one. The desk
+      camera stays with the desk view; picking it here would take it away from
+      the table.
+    </p>
+    <label class="mirror-row">
+      <input type="checkbox" id="toggle-mirror" checked>
+      <span>mirror</span>
+      <span class="mirror-hint">on for a lid camera, off overhead</span>
+      <kbd>m</kbd>
+    </label>
+
+    <h2 class="pose-title">Pose</h2>
+
+    <div class="control">
+      <label>rotate <span class="hint">← →</span></label>
+      <input type="range" id="rotate" min="-100" max="100" value="0">
+    </div>
+    <div class="control">
+      <label>tilt in the palm <span class="hint">↑ ↓</span></label>
+      <input type="range" id="tilt" min="-100" max="100" value="-27">
+    </div>
+    <div class="control">
+      <label>knuckle span <span class="hint">mm</span></label>
+      <input type="range" id="span" min="60" max="110" value="80">
+    </div>
+
+    <div class="toggles">
+      <label><input type="checkbox" id="toggle-dims" checked> dimensions <kbd>d</kbd></label>
+      <label><input type="checkbox" id="toggle-wire"> wireframe <kbd>w</kbd></label>
+      <label><input type="checkbox" id="toggle-occlude" checked> fingers in front <kbd>o</kbd></label>
+    </div>
+
+    <div class="focus-line">
+      <span>bench focus</span>
+      <strong id="focus">—</strong>
+    </div>
+
+    <div class="provenance">
+      <h3>What you're looking at</h3>
+      <ul>
+        <li><b>Real scale.</b> px/mm is derived from index-to-pinky knuckle span,
+          not from a slider. 118 mm on screen is 118 mm on the desk.</li>
+        <li><b>Real pose.</b> The part is seated on a basis built from wrist and
+          knuckles, so it rolls with the hand instead of sliding on it.</li>
+        <li><b>Real occlusion.</b> The camera's own pixels are re-drawn over the
+          fingers, so the hand closes over the part.</li>
+      <li><b>Two cameras, two jobs.</b> The lid camera watches your hand here;
+          the desk camera watches the table. They run in separate processes, so
+          both are live at once — as long as neither grabs the other's device.</li>
+      </ul>
+      <p class="caveat">Geometry is parametric, generated in millimetres from the
+      same numbers as the STEP file. No mesh assets, no WebGL, no CDN for the
+      render itself — only the hand tracker is fetched, and it degrades to a
+      simulated hand when it can't be.</p>
+    </div>
+  </aside>
+
+</main>
+
+<script src="/static/demo.js"></script>
+<script src="/static/cad.js"></script>
+<script src="/static/hold.js"></script>
+<script src="/static/tour.js"></script>
+</body>
+</html>

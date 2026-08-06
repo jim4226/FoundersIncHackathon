@@ -1,11 +1,15 @@
 # python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
 venv/
 
 # mediapipe model bundle (downloaded via curl, see gesture/README.md)
 *.task
 
+# self-signed cert generated on first --https run (backend/tls.py)
+.bench-certs/
+
 # os
 .DS_Store
+*.log

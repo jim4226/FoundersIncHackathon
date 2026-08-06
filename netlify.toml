@@ -1,0 +1,87 @@
+# Netlify hosts the browser half of Bench.
+#
+# The bench itself is a Python process on a laptop with cameras, a headband and
+# a WebSocket server -- none of which Netlify can run, and pretending otherwise
+# would just deploy a UI that hangs on a dead socket. So the deployed site is
+# the front end plus a self-contained demo driver (`web/demo.js`): when no bench
+# answers on the host, the pages fall back to a browser-side simulator that
+# speaks the identical event stream. Judges get a working demo on a URL; the
+# same files, served by `python -m backend.server`, drive the real hardware.
+#
+# There is nothing to build. `web/` is the site.
+
+[build]
+  publish = "web"
+
+# The pages ask for /static/style.css because the FastAPI server mounts them
+# there. Rewriting rather than moving keeps one set of files working under both
+# servers -- no build step, no duplicated assets.
+[[redirects]]
+  from = "/static/*"
+  to = "/:splat"
+  status = 200
+
+# The front door is the landing page: it says what this is, points at the
+# simulated demo anyone can open, and links the recording of the hardware run --
+# which is the one thing a static host cannot give you live.
+[[redirects]]
+  from = "/"
+  to = "/landing.html"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/about"
+  to = "/landing.html"
+  status = 200
+
+[[redirects]]
+  from = "/surface"
+  to = "/surface.html"
+  status = 200
+
+[[redirects]]
+  from = "/control"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/desk"
+  to = "/desk.html"
+  status = 200
+
+[[redirects]]
+  from = "/project"
+  to = "/project.html"
+  status = 200
+
+[[redirects]]
+  from = "/phone"
+  to = "/phone.html"
+  status = 200
+
+[[redirects]]
+  from = "/hold"
+  to = "/hold.html"
+  status = 200
+
+# The real bench renders this QR from its own LAN address. Nothing on Netlify
+# knows that address, so the deployed pairing panel shows a code for this site's
+# own /phone page and says so.
+[[redirects]]
+  from = "/api/pair/qr.svg"
+  to = "/demo-pair-qr.svg"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # The phone page is the one thing here that needs a device permission.
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/*.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"

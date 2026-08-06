@@ -1,0 +1,2393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23000'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23A9C7D6'/%3E%3C/svg%3E">
+<title>Boxic Surface — Portable Espresso Maker</title>
+
+<!-- Both faces are inlined in fonts.css, which is why there is no Google Fonts
+     link here: this is the main interface, and a linked font CDN fails silently
+     to Arial on venue wifi -- the failure you notice last and can do least
+     about. Funnel Display and JetBrains Mono are exactly what this page asked
+     Google for, so the swap is like for like. -->
+<link rel="stylesheet" href="/static/fonts.css">
+
+<!-- Three.js (r128). If the venue wifi dies, __threeFailed triggers a static isometric fallback. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" onerror="window.__threeFailed=true"></script>
+
+<style>
+/* ============================================================
+   BOXIC SURFACE — design tokens
+   The whole interface is treated as *projected light on a table*:
+   dark matte substrate, no opaque panels where avoidable, UI made
+   of lines, rules, tracking marks and glow rather than boxes.
+   ============================================================ */
+:root{
+  --table-0:#000000;         /* the surface emits no light where there is no content */
+  --table-1:#000000;
+  --table-2:#000000;
+  --panel:rgba(0,0,0,.90);
+  --cream:#F2EDE4;
+  --cream-dim:rgba(242,237,228,.62);
+  --cream-faint:rgba(242,237,228,.34);
+  --blue:#A9C7D6;            /* primary projection colour */
+  --blue-soft:rgba(169,199,214,.16);
+  --blue-line:rgba(169,199,214,.30);
+  --red:#FF7454;             /* secondary — attention, links, live */
+  --yellow:#F4B52A;          /* tertiary — used sparingly */
+  --ink:#0C0E10;
+  --ok:#8FBF9F;
+
+  --f-display:'Funnel Display','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+
+  --r:2px;
+  --hit:44px;
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--table-0);color:var(--cream);
+  font-family:var(--f-mono);
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+  cursor:default;
+}
+button{font-family:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+::selection{background:var(--red);color:var(--ink)}
+:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+
+/* ---------- STAGE / TABLE SUBSTRATE ---------- */
+/* Pure black: anything visible here is light the projector is actually casting. */
+#stage{position:fixed;inset:0;overflow:hidden;background:#000}
+/* light that follows the hand */
+#lightfield{position:absolute;width:520px;height:520px;margin:-260px 0 0 -260px;pointer-events:none;
+  background:radial-gradient(circle, rgba(169,199,214,.085) 0%, rgba(169,199,214,.03) 34%, transparent 66%);
+  opacity:0;transition:opacity .5s var(--ease);will-change:transform}
+body.awake #lightfield{opacity:1}
+
+#viewport{position:absolute;inset:0}
+#world{position:absolute;top:0;left:0;width:1600px;height:1000px;transform-origin:0 0;will-change:transform}
+
+/* technical grid, drawn in world space so it pans and zooms with the table */
+#grid{position:absolute;inset:-600px;pointer-events:none;opacity:.5;
+  background-image:
+    linear-gradient(rgba(169,199,214,.055) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(169,199,214,.055) 1px,transparent 1px),
+    linear-gradient(rgba(169,199,214,.11) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(169,199,214,.11) 1px,transparent 1px);
+  background-size:40px 40px,40px 40px,200px 200px,200px 200px;}
+/* mapped-surface boundary — the area the projector has calibrated */
+#bounds{position:absolute;left:-40px;top:-40px;width:1680px;height:1080px;pointer-events:none;
+  border:1px dashed rgba(169,199,214,.20);}
+#bounds::before,#bounds::after{content:'';position:absolute;width:34px;height:34px;border:2px solid var(--blue-line)}
+#bounds::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+#bounds::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+#boundsLabel{position:absolute;left:-40px;top:-64px;font-size:11px;letter-spacing:.22em;color:var(--cream-faint)}
+
+#wires{position:absolute;left:0;top:0;width:1600px;height:1000px;overflow:visible;pointer-events:none}
+
+/* ---------- PHYSICAL OBJECTS ---------- */
+.phys{position:absolute;transform-origin:50% 50%}
+.phys{cursor:grab;z-index:600}
+.phys.dragging{cursor:grabbing;z-index:960}
+.phys .shape{position:absolute;inset:0;transition:filter .2s}
+.phys:hover .shape{filter:drop-shadow(0 0 22px rgba(169,199,214,.22))}
+.phys.dragging .shape{filter:drop-shadow(0 0 34px rgba(169,199,214,.32))}
+.phys:hover .det{border-color:rgba(169,199,214,.55)}
+.phys.dragging .det{border-color:var(--blue);border-style:solid}
+/* a project object about to be linked by a physical object */
+.digi.linkcand .thumb{filter:drop-shadow(0 0 30px rgba(255,116,84,.55))}
+.digi.linkcand .body{border-top-color:var(--red)}
+/* projected detection overlay — dashed box + corner tracking marks */
+.det{position:absolute;inset:-14px;border:1px dashed var(--blue-line);opacity:1;
+  transition:opacity .45s var(--ease),transform .45s var(--ease),border-color .3s}
+.det .tick{position:absolute;width:13px;height:13px;border:1.5px solid var(--blue)}
+.det .tick.tl{left:-1px;top:-1px;border-right:0;border-bottom:0}
+.det .tick.tr{right:-1px;top:-1px;border-left:0;border-bottom:0}
+.det .tick.bl{left:-1px;bottom:-1px;border-right:0;border-top:0}
+.det .tick.br{right:-1px;bottom:-1px;border-left:0;border-top:0}
+body.no-detect .det,body.no-detect .plabel,body.no-detect .leader{opacity:0 !important;pointer-events:none}
+.phys.undetected .det{opacity:0;transform:scale(1.18)}
+.phys.undetected .plabel{opacity:0;transform:translateY(6px)}
+
+/* label sits *beside* the object, never over it */
+.plabel{position:absolute;min-width:150px;padding:0 0 5px 10px;border-left:2px solid var(--blue);
+  transition:opacity .5s var(--ease),transform .5s var(--ease);pointer-events:auto;cursor:pointer}
+.plabel .pname{font-family:var(--f-display);font-weight:700;font-size:15px;letter-spacing:.14em;line-height:1.1}
+.plabel .pmeta{font-size:10.5px;letter-spacing:.1em;color:var(--blue);margin-top:4px}
+.plabel .pnote{font-size:10.5px;letter-spacing:.05em;color:var(--cream-faint);margin-top:2px;max-width:190px}
+.plabel.lft{padding:0 10px 5px 0;border-left:0;border-right:2px solid var(--blue);text-align:right}
+.plabel.lft .pnote{margin-left:auto}
+.phys.linked .plabel.lft{border-right-color:var(--red)}
+.plabel .plink{display:none;margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,116,84,.35);
+  font-size:10.5px;letter-spacing:.06em;color:var(--red)}
+.phys.linked .plabel{border-left-color:var(--red)}
+.phys.linked .plabel .plink{display:block}
+.phys.linked .det{border-color:rgba(255,116,84,.42)}
+.phys.linked .det .tick{border-color:var(--red)}
+.leader{stroke:var(--blue-line);stroke-width:1;stroke-dasharray:3 3}
+
+/* magnetic link candidate */
+.phys.candidate .det{border-color:var(--red);border-style:solid;animation:magnet 1.1s infinite}
+@keyframes magnet{0%,100%{box-shadow:0 0 0 0 rgba(255,116,84,.30)}50%{box-shadow:0 0 0 14px rgba(255,116,84,0)}}
+.magnet{position:absolute;left:50%;top:-46px;transform:translateX(-50%);white-space:nowrap;
+  font-size:10.5px;letter-spacing:.16em;color:var(--ink);background:var(--red);padding:5px 10px;
+  opacity:0;transition:opacity .2s;pointer-events:none;font-weight:600}
+.phys.candidate .magnet{opacity:1}
+.phys.occupied .det{border-color:var(--yellow);border-style:solid}
+.phys.hot .det{border-color:var(--red)}
+
+/* ---------- DIGITAL PROJECT OBJECTS ---------- */
+.digi{position:absolute;width:176px;cursor:grab;user-select:none;
+  transition:opacity .5s var(--ease),filter .25s}
+.digi.dragging{cursor:grabbing;z-index:900 !important}
+.digi .thumb{position:relative;width:176px;height:104px;display:block;
+  filter:drop-shadow(0 0 24px rgba(169,199,214,.16))}
+.digi .body{padding:8px 0 0 0;border-top:1px solid var(--blue-line)}
+.digi .fname{font-family:var(--f-display);font-weight:600;font-size:14px;letter-spacing:.03em;line-height:1.15}
+.digi .frow{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:10px;letter-spacing:.1em;color:var(--cream-faint)}
+.digi .fstatus{font-size:10px;letter-spacing:.1em;margin-top:6px;display:flex;align-items:center;gap:6px}
+.digi .dot{width:6px;height:6px;flex:none;transform:rotate(45deg)}
+.digi .owner{margin-left:auto;font-size:9.5px;letter-spacing:.08em;color:var(--cream-dim);
+  border:1px solid var(--blue-line);padding:2px 5px}
+.digi .updated{font-size:9.5px;letter-spacing:.06em;color:rgba(242,237,228,.28);margin-top:5px}
+.digi.spawning{opacity:0;transform:translateY(18px) scale(.96)}
+
+/* selection = projected corner brackets, not a filled box */
+.sel{position:absolute;inset:-12px -12px -12px -12px;pointer-events:none;opacity:0;transition:opacity .16s}
+.digi.selected .sel{opacity:1}
+.sel i{position:absolute;width:14px;height:14px;border:2px solid var(--red)}
+.sel i.tl{left:0;top:0;border-right:0;border-bottom:0}
+.sel i.tr{right:0;top:0;border-left:0;border-bottom:0}
+.sel i.bl{left:0;bottom:0;border-right:0;border-top:0}
+.sel i.br{right:0;bottom:0;border-left:0;border-top:0}
+.sel u{position:absolute;width:7px;height:7px;background:var(--red);display:block}
+.sel u.n{left:50%;top:-3px;margin-left:-3px}
+.sel u.s{left:50%;bottom:-3px;margin-left:-3px}
+.sel u.w{top:50%;left:-3px;margin-top:-3px}
+.sel u.e{top:50%;right:-3px;margin-top:-3px}
+.digi:hover .thumb{filter:drop-shadow(0 0 30px rgba(169,199,214,.30))}
+.digi.viewing .fname{color:var(--blue)}
+
+.warn{position:absolute;left:50%;top:-30px;transform:translateX(-50%);white-space:nowrap;
+  background:var(--yellow);color:var(--ink);font-size:10px;letter-spacing:.12em;padding:5px 9px;
+  font-weight:700;opacity:0;transition:opacity .18s;pointer-events:none}
+.digi.blocked .warn{opacity:1}
+.digi.blocked .thumb{filter:drop-shadow(0 0 24px rgba(244,181,42,.5))}
+
+/* ---------- STICKY NOTES / COMMENT PINS / CONNECTORS ---------- */
+.sticky{position:absolute;width:168px;min-height:110px;background:rgba(244,181,42,.92);color:var(--ink);
+  padding:12px;font-size:12px;line-height:1.45;letter-spacing:.01em;cursor:grab;
+  transform-origin:50% 0}
+.sticky textarea{width:100%;height:78px;border:0;background:transparent;resize:none;font-family:var(--f-mono);
+  font-size:12px;line-height:1.45;color:var(--ink);outline:none}
+.sticky .sk-h{font-size:9px;letter-spacing:.16em;opacity:.55;margin-bottom:6px}
+.sticky.selected{box-shadow:0 0 0 2px var(--red)}
+
+.cpin{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;cursor:pointer}
+.cpin .bub{position:absolute;inset:0;border-radius:50% 50% 50% 2px;background:var(--red);
+  display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--ink);
+  box-shadow:0 0 12px rgba(255,116,84,.45)}
+.cpin.selected .bub{box-shadow:0 0 0 3px rgba(255,116,84,.35)}
+.cpin .ctext{position:absolute;left:38px;top:0;width:200px;font-size:10.5px;line-height:1.5;
+  color:var(--cream-dim);letter-spacing:.02em;border-left:1px solid rgba(255,116,84,.4);padding-left:8px}
+
+/* ---------- HUD (projected label, not a nav bar) ---------- */
+.ui{position:fixed;z-index:50}
+#hud{left:34px;top:28px;pointer-events:none}
+#hud .brand{font-family:var(--f-display);font-weight:800;font-size:26px;letter-spacing:.20em;line-height:1}
+#hud .rule{width:230px;height:1px;background:linear-gradient(90deg,var(--blue),transparent);margin:11px 0 10px}
+#hud .proj{font-size:11px;letter-spacing:.18em;color:var(--blue)}
+#hud .stats{margin-top:12px;display:grid;gap:4px;font-size:10.5px;letter-spacing:.1em;color:var(--cream-faint)}
+#hud .stats span{color:var(--cream-dim)}
+#presence{display:flex;align-items:center;gap:5px;margin-top:14px}
+#presence .who{width:26px;height:26px;display:grid;place-items:center;font-size:9.5px;font-weight:700;
+  letter-spacing:.04em;color:var(--ink);border-radius:50%}
+#presence .lbl{font-size:9px;letter-spacing:.18em;color:var(--cream-faint);margin-left:5px}
+#hud .stats b{color:var(--cream);font-weight:500}
+.live{display:inline-flex;align-items:center;gap:6px;color:var(--ok) !important}
+.live::before{content:'';width:5px;height:5px;background:var(--ok);border-radius:50%;animation:blip 2s infinite}
+@keyframes blip{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ---------- ACTIVITY STRIP ---------- */
+#activity{left:34px;bottom:30px;width:322px;pointer-events:none}
+#activity h4{margin:0 0 10px;font-size:10px;letter-spacing:.22em;color:var(--cream-faint);font-weight:500;
+  display:flex;align-items:center;gap:8px}
+#activity h4::after{content:'';flex:1;height:1px;background:var(--blue-line)}
+#actList{display:flex;flex-direction:column-reverse;gap:0;max-height:170px;overflow:hidden}
+.act{display:flex;gap:9px;padding:6px 0;font-size:10.5px;letter-spacing:.04em;color:var(--cream-dim);
+  border-bottom:1px solid rgba(169,199,214,.09);line-height:1.4}
+.act .who{color:var(--blue);flex:none}
+.act.fresh{animation:actIn .5s var(--ease)}
+@keyframes actIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+
+/* ---------- TOOLBAR ---------- */
+#toolbar{left:50%;bottom:26px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;
+  padding:6px;border:1px solid var(--blue-line);background:rgba(0,0,0,.80);backdrop-filter:blur(3px)}
+.tb{min-width:var(--hit);height:var(--hit);padding:0 13px;display:inline-flex;align-items:center;gap:8px;
+  font-size:10px;letter-spacing:.13em;color:var(--cream-dim);position:relative;overflow:hidden;
+  transition:color .18s,background .18s}
+.tb svg{width:17px;height:17px;flex:none}
+.tb:hover{color:var(--cream);background:rgba(169,199,214,.10)}
+.tb.on{color:var(--ink);background:var(--blue)}
+.tb.accent{color:var(--ink);background:var(--red);font-weight:700}
+.tb.accent:hover{background:#FF8A6E}
+.tb .kbd{font-size:9px;opacity:.5;letter-spacing:.06em}
+.tbsep{width:1px;height:24px;background:var(--blue-line);margin:0 5px}
+
+/* click ripple — the surface responds to touch */
+.rip{position:absolute;border-radius:50%;background:rgba(242,237,228,.35);transform:translate(-50%,-50%);
+  pointer-events:none;animation:rip .55s var(--ease) forwards}
+@keyframes rip{from{width:0;height:0;opacity:.6}to{width:180px;height:180px;opacity:0}}
+
+/* ---------- CONTEXT TOOLBAR ---------- */
+#ctxbar{position:fixed;z-index:60;display:none;align-items:center;gap:2px;padding:4px;
+  border:1px solid var(--red);background:rgba(0,0,0,.92);transform:translate(-50%,-100%)}
+#ctxbar.show{display:flex}
+.cb{height:36px;min-width:36px;padding:0 9px;display:inline-flex;align-items:center;gap:6px;
+  font-size:9.5px;letter-spacing:.1em;color:var(--cream-dim);transition:.15s}
+.cb svg{width:15px;height:15px}
+.cb:hover{background:rgba(255,116,84,.18);color:var(--cream)}
+.cb.danger:hover{background:var(--red);color:var(--ink)}
+
+/* ---------- 3D VIEWER ---------- */
+#viewer{right:28px;top:28px;width:392px;border:1px solid var(--blue-line);
+  background:var(--panel);display:flex;flex-direction:column}
+#viewer .vhead{padding:13px 15px 12px;border-bottom:1px solid var(--blue-line);position:relative}
+#viewer .vtag{padding-right:76px}
+#vUtil{position:absolute;right:11px;top:9px;display:flex;gap:2px}
+.vu{width:34px;height:34px;display:grid;place-items:center;color:var(--cream-faint);border:1px solid transparent;transition:.15s;position:relative}
+.vu svg{width:15px;height:15px}
+.vu:hover{color:var(--cream);border-color:var(--blue-line)}
+.vu.on{color:var(--ink);background:var(--blue);border-color:var(--blue)}
+.vu[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);right:0;white-space:nowrap;font-size:9px;letter-spacing:.14em;background:var(--cream);color:var(--ink);padding:4px 7px;z-index:6;font-weight:600}
+#viewer .vtag{font-size:9px;letter-spacing:.24em;color:var(--cream-faint);display:flex;align-items:center;gap:7px}
+#viewer .vtag::after{content:'';flex:1;height:1px;background:rgba(169,199,214,.18)}
+#vTitle{font-family:var(--f-display);font-weight:700;font-size:19px;letter-spacing:.13em;margin-top:7px;line-height:1.1}
+#vSub{font-size:10.5px;letter-spacing:.1em;color:var(--blue);margin-top:6px;display:flex;align-items:center;gap:9px}
+.verStep{display:inline-flex;align-items:center;gap:2px;margin-left:auto}
+.verStep button{width:22px;height:22px;border:1px solid var(--blue-line);display:grid;place-items:center;
+  font-size:12px;line-height:1;color:var(--cream-dim)}
+.verStep button:hover{background:var(--blue);color:var(--ink);border-color:var(--blue)}
+#vStage{position:relative;height:250px;background:
+  radial-gradient(80% 70% at 50% 45%,rgba(169,199,214,.09),transparent 70%);overflow:hidden;cursor:grab}
+#vStage.orbiting{cursor:grabbing}
+#vStage.mode-comment{cursor:crosshair}
+#vStage.mode-draw{cursor:crosshair}
+#vCanvas,#vDraw{position:absolute;inset:0;width:100%;height:100%}
+#vDraw{pointer-events:none}
+#vPins{position:absolute;inset:0;pointer-events:none}
+.vpin{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;pointer-events:auto;cursor:pointer;
+  border-radius:50% 50% 50% 2px;background:var(--red);display:grid;place-items:center;
+  font-size:10.5px;font-weight:700;color:var(--ink);box-shadow:0 4px 10px rgba(0,0,0,.5);
+  animation:pinIn .35s var(--ease)}
+@keyframes pinIn{from{transform:scale(0) translateY(-8px);opacity:0}to{transform:none;opacity:1}}
+.vpin:hover{transform:scale(1.12)}
+#vHint{position:absolute;left:12px;bottom:10px;font-size:9.5px;letter-spacing:.14em;color:var(--cream-faint)}
+#vBadge{position:absolute;right:12px;top:10px;font-size:9px;letter-spacing:.14em;color:var(--blue);
+  border:1px solid var(--blue-line);padding:3px 7px}
+#vTools{display:flex;gap:2px;padding:7px;border-top:1px solid var(--blue-line);justify-content:space-between}
+.vt{width:var(--hit);height:44px;display:grid;place-items:center;color:var(--cream-faint);position:relative;
+  transition:.15s;overflow:visible}
+.vt svg{width:17px;height:17px}
+.vt:hover{color:var(--cream);background:rgba(169,199,214,.10)}
+.vt.on{color:var(--ink);background:var(--blue)}
+.vt[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;
+  transform:translateX(-50%);white-space:nowrap;font-size:9px;letter-spacing:.14em;
+  background:var(--cream);color:var(--ink);padding:4px 7px;z-index:5;font-weight:600}
+/* comment composer */
+#composer{border-top:1px solid var(--blue-line);padding:11px 13px;display:none}
+#composer.show{display:block;animation:actIn .3s var(--ease)}
+#composer .ch{font-size:9px;letter-spacing:.2em;color:var(--red);margin-bottom:8px}
+#composer textarea{width:100%;height:56px;background:rgba(169,199,214,.07);border:1px solid var(--blue-line);
+  color:var(--cream);font-family:var(--f-mono);font-size:11.5px;line-height:1.5;padding:8px;resize:none;outline:none}
+#composer textarea:focus{border-color:var(--blue)}
+#composer .cact{display:flex;gap:6px;margin-top:8px}
+.mini{height:32px;padding:0 12px;font-size:9.5px;letter-spacing:.14em;border:1px solid var(--blue-line);color:var(--cream-dim)}
+.mini:hover{border-color:var(--cream);color:var(--cream)}
+.mini.pri{background:var(--red);border-color:var(--red);color:var(--ink);font-weight:700}
+.mini.pri:hover{background:#FF8A6E}
+/* threaded comments */
+#vThread{border-top:1px solid var(--blue-line);max-height:104px;overflow-y:auto}
+#vThread::-webkit-scrollbar{width:4px}
+#vThread::-webkit-scrollbar-thumb{background:var(--blue-line)}
+.cmt{display:flex;gap:9px;padding:9px 14px;border-bottom:1px solid rgba(169,199,214,.08);cursor:pointer}
+.cmt:hover{background:rgba(169,199,214,.05)}
+.cmt .n{width:17px;height:17px;flex:none;border-radius:50% 50% 50% 2px;background:var(--red);color:var(--ink);
+  font-size:9.5px;font-weight:700;display:grid;place-items:center;margin-top:1px}
+.cmt .t{font-size:10.5px;line-height:1.5;color:var(--cream-dim);letter-spacing:.01em}
+.cmt .t em{display:block;font-style:normal;color:var(--cream-faint);font-size:9.5px;letter-spacing:.1em;margin-top:3px}
+
+/* ---------- BOXIE ---------- */
+#boxie{right:28px;bottom:26px;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+#boxiePanel{width:352px;border:1px solid var(--blue-line);background:var(--panel);
+  display:none;overflow:hidden;
+  max-height:calc(100vh - 620px);min-height:238px}
+#boxiePanel.show{display:flex;flex-direction:column;animation:panelIn .32s var(--ease)}
+@keyframes panelIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+#boxiePanel .bh{flex:none;padding:12px 14px;border-bottom:1px solid var(--blue-line);display:flex;align-items:center;gap:9px}
+#boxiePanel .bh .nm{font-family:var(--f-display);font-weight:700;font-size:13px;letter-spacing:.18em}
+#boxiePanel .bh .ctx{margin-left:auto;font-size:9px;letter-spacing:.1em;color:var(--cream-faint);text-align:right}
+#bLog{flex:1 1 auto;min-height:64px;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:11px}
+#bLog::-webkit-scrollbar{width:4px}
+#bLog::-webkit-scrollbar-thumb{background:var(--blue-line)}
+.bmsg{font-size:11.5px;line-height:1.6;letter-spacing:.01em}
+.bmsg.u{color:var(--cream);border-left:2px solid var(--blue);padding-left:9px}
+.bmsg.a{color:var(--cream-dim);white-space:pre-line}
+.bmsg.a b{color:var(--blue);font-weight:500}
+.bmsg.a .hl{color:var(--red)}
+.typing span{display:inline-block;width:4px;height:4px;background:var(--blue);margin-right:3px;animation:tp 1s infinite}
+.typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
+@keyframes tp{0%,100%{opacity:.2}50%{opacity:1}}
+#bPrompts{flex:none;padding:0 14px 12px;display:flex;flex-direction:column;gap:5px}
+.bp{text-align:left;font-size:10.5px;letter-spacing:.03em;line-height:1.45;color:var(--blue);
+  border:1px solid var(--blue-line);padding:9px 11px;min-height:38px;transition:.15s}
+.bp:hover{background:var(--blue);color:var(--ink);border-color:var(--blue)}
+#bAsk{flex:none;display:flex;border-top:1px solid var(--blue-line)}
+#bAsk input{flex:1;height:var(--hit);background:transparent;border:0;outline:none;padding:0 14px;
+  color:var(--cream);font-family:var(--f-mono);font-size:11.5px}
+#bAsk input::placeholder{color:rgba(242,237,228,.30)}
+#bAsk button{width:var(--hit);height:var(--hit);display:grid;place-items:center;color:var(--red)}
+#bAsk button:hover{background:var(--red);color:var(--ink)}
+#boxieBtn{height:52px;padding:0 18px 0 15px;display:inline-flex;align-items:center;gap:11px;
+  border:1px solid var(--red);background:rgba(255,116,84,.10);position:relative;overflow:hidden}
+#boxieBtn:hover{background:rgba(255,116,84,.20)}
+#boxieBtn .nm{font-family:var(--f-display);font-weight:700;font-size:14px;letter-spacing:.2em;color:var(--cream)}
+#boxieBtn .sub{font-size:9px;letter-spacing:.12em;color:var(--cream-faint);display:block;margin-top:2px}
+.orb{width:22px;height:22px;flex:none;position:relative}
+.orb i{position:absolute;inset:0;border:1.5px solid var(--red);border-radius:50%;
+  animation:orb 3.2s linear infinite}
+.orb i:nth-child(2){inset:5px;border-color:var(--yellow);animation-duration:2.1s;animation-direction:reverse}
+.orb i:nth-child(3){inset:9px;background:var(--red);border:0;animation:none}
+@keyframes orb{from{transform:rotate(0) scaleY(.42)}to{transform:rotate(360deg) scaleY(.42)}}
+
+/* ---------- PRESENCE ---------- */
+.cursor{position:absolute;z-index:40;pointer-events:none;transition:transform 2.6s cubic-bezier(.4,0,.2,1)}
+.cursor svg{width:16px;height:21px;display:block;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))}
+.cursor .tag{position:absolute;left:15px;top:15px;font-size:9px;letter-spacing:.12em;padding:3px 6px;
+  color:var(--ink);font-weight:700;white-space:nowrap}
+
+/* ---------- SCAN / CAPTION / TOAST ---------- */
+#scan{position:fixed;top:0;bottom:0;width:190px;pointer-events:none;z-index:45;opacity:0;
+  background:linear-gradient(90deg,transparent,rgba(169,199,214,.14) 62%,rgba(169,199,214,.55) 96%,rgba(242,237,228,.9) 100%);
+  border-right:1px solid rgba(242,237,228,.7)}
+#scan.run{animation:scan 2.6s var(--ease) forwards}
+@keyframes scan{0%{opacity:0;left:-190px}8%{opacity:1}88%{opacity:1}100%{left:100%;opacity:0}}
+
+#caption{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:70;text-align:center;
+  opacity:0;transition:opacity .45s var(--ease);pointer-events:none;max-width:640px}
+#caption.show{opacity:1}
+#caption .step{font-size:9.5px;letter-spacing:.28em;color:var(--red);margin-bottom:9px}
+#caption .line{font-family:var(--f-display);font-weight:500;font-size:21px;letter-spacing:.03em;line-height:1.35;
+  color:var(--cream)}
+#caption .sub{font-size:11px;letter-spacing:.06em;color:var(--cream-faint);margin-top:8px;line-height:1.6}
+
+#toast{position:fixed;left:50%;top:26px;transform:translateX(-50%);z-index:80;display:flex;
+  flex-direction:column;gap:7px;align-items:center;pointer-events:none}
+.tst{font-size:10.5px;letter-spacing:.13em;padding:9px 15px;background:var(--cream);color:var(--ink);
+  font-weight:600;animation:tstIn .3s var(--ease)}
+.tst.warn{background:var(--yellow)}
+.tst.link{background:var(--red)}
+@keyframes tstIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+
+/* demo progress rail */
+#demoRail{position:fixed;left:0;right:0;top:0;height:2px;z-index:85;background:rgba(169,199,214,.14);
+  display:none}
+#demoRail.on{display:block}
+#demoRail i{display:block;height:100%;width:0;background:var(--red);transition:width .4s linear}
+
+/* ---------- BOOT ---------- */
+#boot{position:fixed;inset:0;z-index:200;background:var(--table-0);display:grid;place-items:center;
+  transition:opacity .7s var(--ease)}
+#boot.done{opacity:0;pointer-events:none}
+#boot .in{text-align:center;max-width:560px;padding:0 24px}
+#boot .mark{font-family:var(--f-display);font-weight:800;font-size:38px;letter-spacing:.26em}
+#boot .tl{font-size:10px;letter-spacing:.3em;color:var(--blue);margin-top:14px}
+#boot .bar{width:250px;height:1px;background:rgba(169,199,214,.2);margin:26px auto 0;position:relative}
+#boot .bar i{position:absolute;left:0;top:0;height:1px;background:var(--blue);width:0;animation:load 1.9s var(--ease) forwards}
+@keyframes load{to{width:100%}}
+#boot .st{font-size:10px;letter-spacing:.16em;color:var(--cream-faint);margin-top:14px;height:14px}
+#boot .msg{font-family:var(--f-display);font-size:15px;line-height:1.6;color:var(--cream-dim);margin-top:34px;
+  opacity:0;transition:opacity .8s var(--ease);letter-spacing:.02em}
+#boot .msg.show{opacity:1}
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width:1240px){
+  #viewer{width:330px}
+  #vStage{height:224px}
+  #hud .stats{display:none}
+  #activity{width:270px}
+  #activity #actList{max-height:104px}
+  .tb .lbl{display:none}
+  .tb{padding:0 12px}
+}
+@media (max-width:980px){
+  #viewer{width:288px;right:16px;top:16px}
+  #vStage{height:186px}
+  #vThread{max-height:88px}
+  #hud{left:18px;top:18px}
+  #hud .brand{font-size:20px}
+  #activity{display:none}
+  #boxiePanel{width:288px;max-height:calc(100vh - 430px)}
+  #boxie{right:16px;bottom:88px}
+  #toolbar{bottom:16px;left:16px;transform:none;max-width:calc(100vw - 32px);overflow-x:auto}
+  #caption{bottom:150px;max-width:min(520px,86vw)}
+  #caption .line{font-size:17px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms !important;transition-duration:.05ms !important}
+}
+
+/* ---------- CROSS-VIEW LINKS (added for the deployed site) ---------- */
+#views{position:fixed;right:34px;bottom:28px;z-index:60;display:flex;gap:14px;
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase}
+#views a{color:rgba(242,237,228,.42);text-decoration:none;border-bottom:1px solid transparent;
+  padding-bottom:2px;transition:color .2s,border-color .2s}
+#views a:hover{color:var(--blue);border-bottom-color:var(--blue-line)}
+@media (max-width:900px){#views{right:16px;bottom:14px;gap:10px;font-size:9px}}
+</style>
+</head>
+<body>
+
+<!-- =========================================================
+     BOOT / ONBOARDING — surface mapping + product message
+     ========================================================= -->
+<div id="boot">
+  <div class="in">
+    <div class="mark">BOXIC</div>
+    <div class="tl">SURFACE — SPATIAL PROJECT TABLE</div>
+    <div class="bar"><i></i></div>
+    <div class="st" id="bootSt">Calibrating projector…</div>
+    <div class="msg" id="bootMsg">
+      “Boxic Surface turns any table into a shared project workspace.
+      Physical references, CAD files, comments, and decisions all become part of the same living project record.”
+    </div>
+  </div>
+</div>
+
+<div id="stage">
+  <div id="lightfield"></div>
+
+  <!-- =======================================================
+       THE TABLE — pannable / zoomable world
+       ======================================================= -->
+  <div id="viewport">
+    <div id="world">
+      <div id="grid"></div>
+      <div id="bounds"></div>
+      <div id="boundsLabel">SURFACE MAP · 1.60 × 1.00 m · CALIBRATED</div>
+      <!-- relationship lines + connectors live here, in world coordinates -->
+      <svg id="wires">
+        <g id="wLeaders"></g>
+        <g id="wLinks"></g>
+        <g id="wConn"></g>
+        <g id="wDraft"></g>
+      </svg>
+      <div id="physLayer"></div>
+      <div id="digiLayer"></div>
+      <div id="pinLayer"></div>
+    </div>
+  </div>
+
+  <div id="scan"></div>
+  <div id="demoRail"><i></i></div>
+
+  <!-- =======================================================
+       PROJECT HEADER (projected label, not a nav bar)
+       ======================================================= -->
+  <header class="ui" id="hud">
+    <div class="brand">BOXIC SURFACE</div>
+    <div class="rule"></div>
+    <div class="proj">PROJECT: PORTABLE ESPRESSO MAKER</div>
+    <div class="stats">
+      <span class="live">Surface mapped</span>
+      <span><b id="stPhys">4</b> physical objects detected</span>
+      <span><b id="stDigi">6</b> project objects active</span>
+      <span><b id="stPpl">3</b> collaborators present</span>
+    </div>
+    <div id="presence">
+      <span class="who" style="background:#A9C7D6">KC</span>
+      <span class="who" style="background:#FF7454">MT</span>
+      <span class="who" style="background:#F4B52A">AL</span>
+      <span class="lbl">ON THIS SURFACE</span>
+    </div>
+  </header>
+
+  <!-- =======================================================
+       ACTIVITY STRIP
+       ======================================================= -->
+  <aside class="ui" id="activity">
+    <h4>PROJECT ACTIVITY</h4>
+    <div id="actList"></div>
+  </aside>
+
+  <!-- =======================================================
+       BOXIC 3D VIEWER
+       ======================================================= -->
+  <section class="ui" id="viewer">
+    <div class="vhead">
+      <div class="vtag">BOXIC 3D REVIEW</div>
+      <div id="vUtil"></div>
+      <div id="vTitle">HINGE HOUSING</div>
+      <div id="vSub">
+        <span id="vVer">Version 12</span> · <span id="vStatus">In Review</span>
+        <span class="verStep">
+          <button id="verDown" title="Previous version">&minus;</button>
+          <button id="verUp" title="Next version">+</button>
+        </span>
+      </div>
+    </div>
+    <div id="vStage">
+      <canvas id="vCanvas"></canvas>
+      <canvas id="vDraw"></canvas>
+      <div id="vPins"></div>
+      <div id="vBadge">LIVE</div>
+      <div id="vHint">DRAG TO ORBIT · SCROLL TO ZOOM</div>
+    </div>
+    <div id="vTools"></div>
+    <div id="composer">
+      <div class="ch">NEW COMMENT · PIN <span id="cmpN">4</span></div>
+      <textarea id="cmpText" placeholder="Describe the change you need…"></textarea>
+      <div class="cact">
+        <button class="mini pri" id="cmpSave">POST COMMENT</button>
+        <button class="mini" id="cmpCancel">CANCEL</button>
+      </div>
+    </div>
+    <div id="vThread"></div>
+  </section>
+
+  <!-- =======================================================
+       BOXIE — project assistant
+       ======================================================= -->
+  <div class="ui" id="boxie">
+    <div id="boxiePanel">
+      <div class="bh">
+        <span class="orb"><i></i><i></i><i></i></span>
+        <span class="nm">BOXIE</span>
+        <span class="ctx" id="bCtx">ON TABLE · 4 OBJECTS</span>
+      </div>
+      <div id="bLog"></div>
+      <div id="bPrompts"></div>
+      <div id="bAsk">
+        <input id="bInput" placeholder="Ask Boxie about this project…" />
+        <button id="bSend" aria-label="Send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="18" height="18"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+    </div>
+    <button id="boxieBtn" class="rippler">
+      <span class="orb"><i></i><i></i><i></i></span>
+      <span>
+        <span class="nm">BOXIE</span>
+        <span class="sub">PROJECT ASSISTANT</span>
+      </span>
+    </button>
+  </div>
+
+  <!-- =======================================================
+       SURFACE TOOLBAR
+       ======================================================= -->
+  <div class="ui" id="toolbar"></div>
+  <div id="ctxbar"></div>
+  <div id="caption"></div>
+  <div id="toast"></div>
+</div>
+<script>
+/* ============================================================================
+   BOXIC SURFACE — prototype runtime
+   ----------------------------------------------------------------------------
+   [1] UTILITIES + DATA MODEL
+   [2] PROCEDURAL SVG  (physical silhouettes + isometric CAD thumbnails)
+   [3] WORLD RENDER + VIEW TRANSFORM   (pan / zoom / infinite canvas)
+   [4] SELECTION, DRAG, OCCLUSION      (physical-object avoidance)
+   [5] PHYSICAL <-> DIGITAL LINKING    (magnetic drop + relationship lines)
+   [6] CANVAS TOOLS                    (sticky, connector, comment pin)
+   [7] THREE.JS 3D VIEWER              (orbit / explode / section / wireframe)
+   [8] ANNOTATION LAYER                (spatial comment pins + freehand draw)
+   [9] BOXIE ASSISTANT
+   [10] DEMO SEQUENCE
+   [11] BOOT
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- [1] UTILS */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp  = (a, b, t) => a + (b - a) * t;
+const wait  = ms => new Promise(r => setTimeout(r, ms));
+const uid   = (p = 'o') => p + Math.random().toString(36).slice(2, 8);
+function el(tag, cls, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html != null) e.innerHTML = html;
+  return e;
+}
+const ease = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+/* tween a numeric pair over time — used by the demo sequence */
+function tween(ms, fn) {
+  return new Promise(res => {
+    const t0 = performance.now();
+    (function step(now) {
+      const t = clamp((now - t0) / ms, 0, 1);
+      fn(ease(t));
+      if (t < 1) requestAnimationFrame(step); else res();
+    })(t0);
+  });
+}
+
+const svgIcon = (d, sw = 1.6) =>
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + sw +
+  '" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+
+const ICON = {
+  scan:    '<path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M3 12h18"/>',
+  note:    '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M8 9h8M8 13h5"/>',
+  link:    '<path d="M10.5 13.5 13.5 10.5"/><path d="M11 6.5 12.5 5a4 4 0 0 1 5.7 5.7L16.7 12"/><path d="M13 17.5 11.5 19a4 4 0 0 1-5.7-5.7L7.3 12"/>',
+  pin:     '<path d="M21 14a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/>',
+  reset:   '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
+  play:    '<path d="M6 4 20 12 6 20z" fill="currentColor" stroke-width="1"/>',
+  stop:    '<rect x="6" y="6" width="12" height="12" fill="currentColor" stroke-width="1"/>',
+  eye:     '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.6"/>',
+  trash:   '<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/>',
+  copy:    '<rect x="9" y="9" width="11" height="11"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/>',
+  front:   '<path d="M12 4v13M7 9l5-5 5 5"/><path d="M4 20h16"/>',
+  back:    '<path d="M12 20V7M7 15l5 5 5-5"/><path d="M4 4h16"/>',
+  cube:    '<path d="M12 3 20.5 7.5v9L12 21l-8.5-4.5v-9z"/><path d="M12 21v-9M3.5 7.5 12 12l8.5-4.5"/>',
+  orbit:   '<circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="10" ry="4.4" transform="rotate(-28 12 12)"/>',
+  pan:     '<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
+  zoom:    '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5M11 8.5v5"/>',
+  fit:     '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><rect x="9" y="9" width="6" height="6"/>',
+  explode: '<rect x="9.5" y="9.5" width="5" height="5"/><path d="M12 7V3M12 21v-4M7 12H3M21 12h-4"/>',
+  section: '<path d="M4 4h16v16H4z"/><path d="M4 20 20 4"/><path d="M8 20h4v-4"/>',
+  draw:    '<path d="M4 19s2.5-9 6-9 3 6 6.5 6 3.5-4 3.5-4"/><path d="M18.5 4.5 20 6l-9 9-2.2.7.7-2.2z"/>',
+  send:    '<path d="M5 12h14M13 6l6 6-6 6"/>'
+};
+
+/* ------------------------------------------------------------- DATA: PEOPLE */
+const PEOPLE = {
+  KC: { name: 'Ken',  color: '#A9C7D6' },
+  MT: { name: 'Maya', color: '#FF7454' },
+  AL: { name: 'Alex', color: '#F4B52A' }
+};
+
+const STATUS = {
+  'In Review':         '#A9C7D6',
+  'Changes Requested': '#FF7454',
+  'Supplier Review':   '#F4B52A',
+  'Approved':          '#8FBF9F',
+  'Prototype Ready':   '#F2EDE4',
+  'Updated':           '#A9C7D6'
+};
+
+/* --------------------------------------------------- DATA: PROJECT OBJECTS */
+/* The espresso-maker programme. Each entry is a spatial object on the table. */
+const SEED_FILES = [
+  { id: 'f-hinge', name: 'Hinge Housing',        ver: 12, status: 'In Review',         comments: 3, owner: 'KC', updated: '2h ago',  model: 'hinge',     x: 150,  y: 120 },
+  { id: 'f-handle',name: 'Handle Assembly',      ver: 7,  status: 'Changes Requested', comments: 5, owner: 'MT', updated: '40m ago', model: 'handle',    x: 150,  y: 480 },
+  { id: 'f-encl',  name: 'Electronics Enclosure',ver: 18, status: 'Supplier Review',   comments: 2, owner: 'AL', updated: '5h ago',  model: 'enclosure', x: 372,  y: 760 },
+  { id: 'f-mount', name: 'Motor Mount',          ver: 5,  status: 'Approved',          comments: 1, owner: 'KC', updated: '1d ago',  model: 'mount',     x: 1150, y: 610 },
+  { id: 'f-cmf',   name: 'CMF Direction Board',  ver: 3,  status: 'In Review',         comments: 8, owner: 'MT', updated: '3h ago',  model: 'cmf',       x: 1300, y: 120 },
+  { id: 'f-tol',   name: 'Supplier Tolerance Notes', ver: 2, status: 'Updated',        comments: 2, owner: 'AL', updated: '25m ago', model: 'notes',     x: 1268, y: 830 }
+];
+
+/* Preloaded 3D review comments, positioned in model space. */
+const SEED_THREADS = {
+  'f-hinge': [
+    { n: 1, text: 'Can we increase clearance here by 0.5 mm?',        who: 'MT', at: 'Jun 18', p: [ 0.30, 0.55,  0.45] },
+    { n: 2, text: 'Supplier confirmed this radius is manufacturable.', who: 'AL', at: 'Jun 21', p: [-0.62, 0.30,  0.38] },
+    { n: 3, text: 'Approved for the next prototype.',                  who: 'KC', at: 'Jul 02', p: [ 0.05,-0.18, -0.55] }
+  ],
+  'f-handle': [
+    { n: 1, text: 'Grip diameter still reads too thin in hand.',  who: 'KC', at: 'Jul 09', p: [ 0.10, 0.42, 0.30] },
+    { n: 2, text: 'Rework the transition into the body flange.',  who: 'AL', at: 'Jul 12', p: [-0.55, 0.20, 0.25] }
+  ],
+  'f-encl':  [ { n: 1, text: 'Vent spacing sent to supplier for tooling review.', who: 'AL', at: 'Jul 15', p: [0.2, 0.5, 0.3] } ],
+  'f-mount': [ { n: 1, text: 'Approved — matches the Prototype 4 bolt pattern.',  who: 'KC', at: 'Jul 05', p: [0.0, 0.45, 0.4] } ],
+  'f-cmf':   [ { n: 1, text: 'Coral reads warmer than the anodised sample.',      who: 'MT', at: 'Jul 20', p: [0.3, 0.3, 0.3] } ],
+  'f-tol':   [ { n: 1, text: 'Tolerance stack updated after the June review.',    who: 'AL', at: 'Jul 22', p: [0.1, 0.4, 0.2] } ]
+};
+
+/* -------------------------------------------------- DATA: PHYSICAL OBJECTS */
+/* Simulated computer-vision detections. Position is the object centre. */
+const PHYS = [
+  { id: 'p-phone', type: 'PHONE',      kind: 'phone', x: 700,  y: 300, w: 78,  h: 152, rot: -7,
+    conf: 97, note: 'Reference photos available', side: 'right',
+    link: { fileId: 'f-encl', use: 'Photo reference · bezel study' } },
+  { id: 'p-mug',   type: 'MUG',        kind: 'mug',   x: 1055, y: 262, w: 128, h: 108, rot: 0,
+    conf: 88, note: 'Unlinked object', side: 'left',  link: null },
+  { id: 'p-mouse', type: 'MOUSE',      kind: 'mouse', x: 902,  y: 566, w: 92,  h: 140, rot: 11,
+    conf: 94, note: 'Unlinked object', side: 'right', link: null },
+  { id: 'p-book',  type: 'SKETCHBOOK', kind: 'book',  x: 556,  y: 640, w: 228, h: 168, rot: -4,
+    conf: 91, note: 'Linked to Concept Development', side: 'left', link: null }
+];
+
+/* ------------------------------------------------------------- APP STATE */
+const state = {
+  view:      { x: 0, y: 0, k: 1 },
+  objects:   [],            // files, stickies and canvas pins — everything draggable
+  phys:      PHYS,
+  connectors:[],            // { id, a, b }  free connector lines between objects
+  sel:       new Set(),
+  viewing:   'f-hinge',     // file currently loaded in the 3D viewer
+  detect:    true,
+  tool:      null,          // null | 'connect' | 'pin'
+  connectFrom: null,
+  z:         10,
+  demo:      { running: false, token: 0 }
+};
+
+/* seed the object list */
+SEED_FILES.forEach((f, i) => {
+  state.objects.push(Object.assign({}, f, {
+    type: 'file', z: 10 + i,
+    thread: (SEED_THREADS[f.id] || []).map(c => Object.assign({}, c))
+  }));
+});
+
+const byId   = id => state.objects.find(o => o.id === id);
+const physById = id => state.phys.find(p => p.id === id);
+const fileTitle = o => o.name.toUpperCase();
+const verLabel  = o => 'v' + String(o.ver).padStart(2, '0');
+
+/* ------------------------------------------------- [2] PROCEDURAL SVG ART */
+/* --- physical object silhouettes: top-down, matte, lit from upper-left --- */
+function physSVG(kind) {
+  const S = {
+    phone: `<svg viewBox="0 0 78 152" class="shape">
+      <defs><linearGradient id="gph" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4B565F"/><stop offset=".55" stop-color="#39434B"/><stop offset="1" stop-color="#2A323A"/>
+      </linearGradient></defs>
+      <rect x="1" y="1" width="76" height="150" rx="11" fill="url(#gph)" stroke="#68757F" stroke-width="1.2"/>
+      <rect x="5" y="5" width="68" height="142" rx="8" fill="#191F24"/>
+      <rect x="5" y="5" width="68" height="142" rx="8" fill="rgba(169,199,214,.09)"/>
+      <rect x="26" y="8" width="26" height="5" rx="2.5" fill="#0B0E10"/>
+      <rect x="8" y="126" width="62" height="1" fill="rgba(242,237,228,.10)"/>
+      <path d="M6 6 Q 30 4 40 6 L 12 60 Q 6 40 6 6z" fill="rgba(242,237,228,.075)"/>
+    </svg>`,
+    mouse: `<svg viewBox="0 0 92 140" class="shape">
+      <defs><linearGradient id="gms" x1=".15" y1="0" x2=".9" y2="1">
+        <stop offset="0" stop-color="#464F58"/><stop offset=".5" stop-color="#323A41"/><stop offset="1" stop-color="#252D33"/>
+      </linearGradient></defs>
+      <path d="M46 2 C 74 2 90 30 90 74 C 90 116 72 138 46 138 C 20 138 2 116 2 74 C 2 30 18 2 46 2 Z"
+            fill="url(#gms)" stroke="#576470" stroke-width="1"/>
+      <path d="M46 3 C 30 3 16 22 12 46 C 22 30 34 22 46 22 Z" fill="rgba(242,237,228,.06)"/>
+      <path d="M46 4 V 44" stroke="#151A1E" stroke-width="1.4"/>
+      <rect x="41" y="16" width="10" height="20" rx="5" fill="#12171A" stroke="#4A555E" stroke-width=".8"/>
+      <path d="M8 60 Q 46 52 84 60" stroke="rgba(242,237,228,.05)" stroke-width="1" fill="none"/>
+    </svg>`,
+    book: `<svg viewBox="0 0 228 168" class="shape">
+      <defs><linearGradient id="gbk" x1="0" y1="0" x2=".8" y2="1">
+        <stop offset="0" stop-color="#3F4941"/><stop offset="1" stop-color="#2B332E"/>
+      </linearGradient></defs>
+      <rect x="14" y="6" width="210" height="158" rx="3" fill="#0E1113" opacity=".85"/>
+      <rect x="10" y="3" width="210" height="158" rx="3" fill="#C9C2B2"/>
+      <rect x="10" y="3" width="210" height="158" rx="3" fill="rgba(0,0,0,.12)"/>
+      <rect x="8" y="1" width="210" height="158" rx="3" fill="url(#gbk)" stroke="#515C54" stroke-width="1"/>
+      <path d="M8 2 H 150 L 40 120 H 8 Z" fill="rgba(242,237,228,.035)"/>
+      <g fill="none" stroke="#8D9A93" stroke-width="2.4" opacity=".8">
+        <path d="M4 16 h16"/><path d="M4 38 h16"/><path d="M4 60 h16"/><path d="M4 82 h16"/>
+        <path d="M4 104 h16"/><path d="M4 126 h16"/><path d="M4 148 h16"/>
+      </g>
+      <rect x="150" y="1" width="4" height="158" fill="rgba(0,0,0,.45)"/>
+      <rect x="36" y="34" width="96" height="2" fill="rgba(242,237,228,.10)"/>
+      <rect x="36" y="48" width="64" height="2" fill="rgba(242,237,228,.07)"/>
+    </svg>`,
+    mug: `<svg viewBox="0 0 128 108" class="shape">
+      <defs><radialGradient id="gmg" cx=".35" cy=".3" r=".8">
+        <stop offset="0" stop-color="#E8E2D6"/><stop offset=".7" stop-color="#C6BFB2"/><stop offset="1" stop-color="#9A9488"/>
+      </radialGradient></defs>
+      <path d="M92 32 h12 a20 20 0 0 1 0 40 h-12" fill="none" stroke="#C6BFB2" stroke-width="9" stroke-linecap="round"/>
+      <circle cx="52" cy="52" r="50" fill="url(#gmg)" stroke="#7E786D" stroke-width="1"/>
+      <circle cx="52" cy="52" r="42" fill="#2A211B"/>
+      <circle cx="52" cy="52" r="41" fill="#3B2A1E"/>
+      <ellipse cx="40" cy="40" rx="15" ry="9" fill="rgba(242,237,228,.10)" transform="rotate(-25 40 40)"/>
+      <path d="M14 30 A 50 50 0 0 1 46 4" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2"/>
+    </svg>`
+  };
+  return S[kind] || '';
+}
+
+/* --- isometric CAD thumbnails, built from projected boxes ---------------- */
+const PAL = {
+  m:      { t: '#C8DAE4', f: '#8FABBA', s: '#617985' },   // machined body
+  a:      { t: '#E7EFF4', f: '#A9C7D6', s: '#758D9A' },   // accent / secondary part
+  d:      { t: '#7E9400', f: '#54666F', s: '#3E4F58' },   // dark hardware
+  blue:   { t: '#C3DBE7', f: '#A9C7D6', s: '#75919F' },
+  red:    { t: '#FF9174', f: '#FF7454', s: '#C4553B' },
+  yellow: { t: '#FFCC55', f: '#F4B52A', s: '#B8871A' },
+  cream:  { t: '#F7F3EC', f: '#E2DACB', s: '#ADA596' }
+};
+PAL.d.t = '#6E838E';
+
+const MODELS = {
+  hinge: [
+    { b: [0, 0, 0, 62, 26, 5] },
+    { b: [2, 2, 5, 15, 22, 15] },
+    { b: [45, 2, 5, 15, 22, 15] },
+    { b: [17, 8, 11, 28, 10, 4], p: 'a' },
+    { b: [8, 9, -3, 9, 9, 3], p: 'd' },
+    { b: [45, 9, -3, 9, 9, 3], p: 'd' }
+  ],
+  handle: [
+    { b: [0, 0, 0, 14, 14, 11] },
+    { b: [56, 0, 0, 14, 14, 11] },
+    { b: [5, 3, 11, 60, 8, 7], p: 'a' },
+    { b: [14, 2, 4, 42, 11, 6] }
+  ],
+  enclosure: [
+    { b: [0, 0, 0, 56, 40, 9] },
+    { b: [2, 2, 9, 52, 36, 7], p: 'a' },
+    { b: [10, 7, 16, 13, 3, 2], p: 'd' },
+    { b: [10, 14, 16, 13, 3, 2], p: 'd' },
+    { b: [10, 21, 16, 13, 3, 2], p: 'd' },
+    { b: [48, 14, 3, 4, 12, 4], p: 'd' }
+  ],
+  mount: [
+    { b: [0, 0, 0, 48, 48, 5] },
+    { b: [14, 14, 5, 20, 20, 15], p: 'a' },
+    { b: [2, 2, 5, 7, 7, 3], p: 'd' },
+    { b: [39, 2, 5, 7, 7, 3], p: 'd' },
+    { b: [2, 39, 5, 7, 7, 3], p: 'd' },
+    { b: [39, 39, 5, 7, 7, 3], p: 'd' }
+  ],
+  cmf: [
+    { b: [0, 0, 0, 60, 44, 3] },
+    { b: [5, 5, 3, 22, 15, 2], p: 'blue' },
+    { b: [33, 5, 3, 22, 15, 2], p: 'red' },
+    { b: [5, 24, 3, 22, 15, 2], p: 'yellow' },
+    { b: [33, 24, 3, 22, 15, 2], p: 'cream' }
+  ],
+  notes: [
+    { b: [0, 0, 0, 50, 40, 2], p: 'cream' },
+    { b: [4, 4, 2, 50, 40, 2], p: 'cream' },
+    { b: [8, 8, 4, 50, 40, 2], p: 'a' }
+  ]
+};
+
+function isoPt(x, y, z) { return [(x - y) * 0.866, (x + y) * 0.5 - z]; }
+
+/* Build an isometric SVG from a parts list. Auto-fits the given box. */
+function isoSVG(modelKey, W, H) {
+  const parts = MODELS[modelKey] || MODELS.hinge;
+  const faces = [];
+  parts.forEach(part => {
+    const [x, y, z, w, d, h] = part.b;
+    const pal = PAL[part.p || 'm'];
+    const P = isoPt;
+    const quad = pts => pts.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' ');
+    const depth = (x + w / 2) + (y + d / 2) + (z + h / 2);
+    faces.push({ depth: depth, fill: pal.s, pts: quad([P(x + w, y, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x + w, y, z + h)]) });
+    faces.push({ depth: depth, fill: pal.f, pts: quad([P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x, y + d, z + h)]) });
+    faces.push({ depth: depth + .01, fill: pal.t, pts: quad([P(x, y, z + h), P(x + w, y, z + h), P(x + w, y + d, z + h), P(x, y + d, z + h)]) });
+  });
+  faces.sort((a, b) => a.depth - b.depth);
+
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  faces.forEach(f => f.pts.split(' ').forEach(p => {
+    const c = p.split(',').map(Number);
+    minX = Math.min(minX, c[0]); maxX = Math.max(maxX, c[0]);
+    minY = Math.min(minY, c[1]); maxY = Math.max(maxY, c[1]);
+  }));
+  const pad = 4;
+  const vb = [minX - pad, minY - pad, (maxX - minX) + pad * 2, (maxY - minY) + pad * 2];
+  const body = faces.map(f =>
+    '<polygon points="' + f.pts + '" fill="' + f.fill + '" stroke="#161A1E" stroke-width=".5" stroke-linejoin="round"/>'
+  ).join('');
+  return '<svg class="thumb" viewBox="' + vb.join(' ') + '" width="' + W + '" height="' + H + '" preserveAspectRatio="xMidYMid meet">' + body + '</svg>';
+}
+
+/* ------------------------------------- [3] WORLD RENDER + VIEW TRANSFORM */
+const worldEl  = $('#world');
+const physLayer= $('#physLayer');
+const digiLayer= $('#digiLayer');
+const pinLayer = $('#pinLayer');
+const stage    = $('#stage');
+
+function applyView() {
+  const v = state.view;
+  worldEl.style.transform = 'translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.k + ')';
+  positionCtx();
+}
+function screenToWorld(sx, sy) {
+  const v = state.view;
+  return { x: (sx - v.x) / v.k, y: (sy - v.y) / v.k };
+}
+function resetView(animated) {
+  const k = clamp(Math.min(innerWidth / 1780, innerHeight / 1180), .42, 1);
+  const target = { k: k, x: (innerWidth - 1600 * k) / 2, y: (innerHeight - 1000 * k) / 2 + 10 };
+  if (!animated) { Object.assign(state.view, target); applyView(); return Promise.resolve(); }
+  const from = Object.assign({}, state.view);
+  return tween(520, t => {
+    state.view.k = lerp(from.k, target.k, t);
+    state.view.x = lerp(from.x, target.x, t);
+    state.view.y = lerp(from.y, target.y, t);
+    applyView();
+  });
+}
+
+/* ---- physical objects: silhouette + detection frame + adjacent label ---- */
+function renderPhys() {
+  physLayer.innerHTML = '';
+  state.phys.forEach(p => {
+    const n = el('div', 'phys');
+    n.dataset.id = p.id;
+    n.style.cssText = 'left:' + (p.x - p.w / 2) + 'px;top:' + (p.y - p.h / 2) + 'px;width:' + p.w + 'px;height:' + p.h +
+                      'px;transform:rotate(' + p.rot + 'deg)';
+    n.innerHTML = physSVG(p.kind) +
+      '<div class="det"><i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>' +
+      '<div class="magnet">RELEASE TO LINK</div></div>';
+
+    const lab = el('div', 'plabel' + (p.side === 'left' ? ' lft' : ''));
+    lab.innerHTML =
+      '<div class="pname">' + p.type + '</div>' +
+      '<div class="pmeta">Detected · <span class="conf">' + p.conf + '%</span></div>' +
+      '<div class="pnote">' + p.note + '</div>' +
+      '<div class="plink"></div>';
+    /* counter-rotate the label so projected text stays level with the table */
+    const off = 30;
+    lab.style.cssText = (p.side === 'left' ? 'right' : 'left') + ':calc(100% + ' + off + 'px);top:0;' +
+      'transform-origin:' + (p.side === 'left' ? 'right' : 'left') + ' top;transform:rotate(' + (-p.rot) + 'deg)';
+    n.appendChild(lab);
+    n.addEventListener('pointerdown', e => startPhysDrag(e, p));
+    p._el = n; p._lab = lab;
+    physLayer.appendChild(n);
+    paintPhysLabel(p);
+  });
+  drawLeaders();
+}
+
+function paintPhysLabel(p) {
+  if (!p._lab) return;
+  const meta = $('.pmeta', p._lab), note = $('.pnote', p._lab), lk = $('.plink', p._lab);
+  if (p.link) {
+    const f = byId(p.link.fileId);
+    p._el.classList.add('linked');
+    meta.innerHTML = 'Detected · <span class="conf">Linked</span>';
+    note.textContent = p.note;
+    lk.innerHTML = (f ? f.name + ' ' + verLabel(f) : '—') + '<br><span style="color:rgba(242,237,228,.4)">' + p.link.use + '</span>';
+  } else {
+    p._el.classList.remove('linked');
+    meta.innerHTML = 'Detected · <span class="conf">' + p.conf + '%</span>';
+    note.textContent = p.note;
+    lk.innerHTML = '';
+  }
+}
+
+/* thin leader lines from each object to its projected label */
+function drawLeaders() {
+  const g = $('#wLeaders');
+  g.innerHTML = state.phys.map(p => {
+    const half = p.w / 2;
+    const x1 = p.side === 'left' ? p.x - half - 15 : p.x + half + 15;
+    const x2 = p.side === 'left' ? p.x - half - 30 : p.x + half + 30;
+    const y  = p.y - p.h / 2 + 12;
+    return '<line class="leader" x1="' + x1 + '" y1="' + p.y + '" x2="' + x2 + '" y2="' + p.y + '"/>' +
+           '<line class="leader" x1="' + x2 + '" y1="' + p.y + '" x2="' + x2 + '" y2="' + y + '"/>';
+  }).join('');
+}
+
+/* ---- digital project objects ------------------------------------------- */
+function statusMark(s) {
+  const c = STATUS[s] || '#A9C7D6';
+  return '<i class="dot" style="background:' + c + '"></i><span style="color:' + c + '">' + s.toUpperCase() + '</span>';
+}
+
+function objMarkup(o) {
+  if (o.type === 'sticky') {
+    return '<div class="sk-h">STICKY · ' + o.owner + '</div><textarea spellcheck="false">' + (o.text || '') + '</textarea>';
+  }
+  return '<div class="warn">PHYSICAL OBJECT OCCUPYING THIS AREA</div>' +
+    '<div class="sel"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>' +
+    '<u class="n"></u><u class="s"></u><u class="w"></u><u class="e"></u></div>' +
+    isoSVG(o.model, 176, 104) +
+    '<div class="body">' +
+      '<div class="fname">' + o.name + '</div>' +
+      '<div class="frow">' +
+        '<span style="color:var(--blue);display:inline-flex;width:13px;height:13px">' + svgIcon(ICON.cube, 1.4) + '</span>' +
+        '<span>' + verLabel(o) + '</span><span>·</span><span>' + o.thread.length + ' COMMENTS</span>' +
+        '<span class="owner">' + o.owner + '</span>' +
+      '</div>' +
+      '<div class="fstatus">' + statusMark(o.status) + '</div>' +
+      '<div class="updated">UPDATED ' + o.updated.toUpperCase() + '</div>' +
+    '</div>';
+}
+
+function renderObjects() {
+  const seen = new Set();
+  state.objects.forEach(o => {
+    seen.add(o.id);
+    let n = o._el;
+    if (!n || !n.isConnected) {
+      n = el('div', o.type === 'sticky' ? 'sticky' : 'digi');
+      n.dataset.id = o.id;
+      digiLayer.appendChild(n);
+      o._el = n;
+      n.innerHTML = objMarkup(o);
+      if (o.type === 'sticky') {
+        const ta = $('textarea', n);
+        ta.addEventListener('input', () => { o.text = ta.value; });
+        ta.addEventListener('pointerdown', e => e.stopPropagation());
+      }
+      n.addEventListener('pointerdown', e => startObjDrag(e, o));
+      n.classList.add('spawning');
+      requestAnimationFrame(() => requestAnimationFrame(() => n.classList.remove('spawning')));
+    }
+    n.style.left = o.x + 'px';
+    n.style.top  = o.y + 'px';
+    n.style.zIndex = o.z;
+    n.classList.toggle('selected', state.sel.has(o.id));
+    n.classList.toggle('viewing', o.id === state.viewing);
+  });
+  /* remove deleted */
+  $$('#digiLayer > *').forEach(n => { if (!seen.has(n.dataset.id)) n.remove(); });
+  state.objects.filter(o => o.type === 'file').forEach(o => {
+    if (!o._el) return;
+    const c = $('.frow span:nth-child(4)', o._el);
+    if (c) c.textContent = o.thread.length + ' COMMENTS';
+  });
+  $('#stDigi').textContent = state.objects.filter(o => o.type === 'file').length;
+  drawWires();
+  positionCtx();
+}
+
+function objBox(o) {
+  const n = o._el;
+  const w = (n && n.offsetWidth)  || 176;
+  const h = (n && n.offsetHeight) || 200;
+  return { x: o.x, y: o.y, w: w, h: h, cx: o.x + w / 2, cy: o.y + h / 2 };
+}
+/* the calibrated area the projector can actually see */
+const SURFACE = { x: -40, y: -40, w: 1680, h: 1080 };
+
+/* rotated footprint of a physical object */
+function physExtent(p) {
+  const s = Math.abs(Math.sin(p.rot * Math.PI / 180)), c = Math.abs(Math.cos(p.rot * Math.PI / 180));
+  return { w: p.w * c + p.h * s, h: p.w * s + p.h * c };
+}
+/* detection frame counts as occupied space — UI must never sit on an object */
+function physBox(p) {
+  const pad = 16, e = physExtent(p);
+  return { x: p.x - e.w / 2 - pad, y: p.y - e.h / 2 - pad, w: e.w + pad * 2, h: e.h + pad * 2, cx: p.x, cy: p.y };
+}
+const inSurface = (x, y, w, h) =>
+  x > SURFACE.x && y > SURFACE.y && x + w < SURFACE.x + SURFACE.w && y + h < SURFACE.y + SURFACE.h;
+
+/* first clear position adjacent to a physical object, or null */
+function freeSpotBeside(ph, w, h) {
+  const pb = physBox(ph);
+  const opts = [
+    { x: pb.x + pb.w + 24, y: pb.cy - h / 2 },
+    { x: pb.x - w - 24,    y: pb.cy - h / 2 },
+    { x: pb.cx - w / 2,    y: pb.y + pb.h + 24 },
+    { x: pb.cx - w / 2,    y: pb.y - h - 24 }
+  ];
+  for (const c of opts) {
+    if (!inSurface(c.x, c.y, w, h)) continue;
+    if (!state.phys.some(p2 => overlap({ x: c.x, y: c.y, w: w, h: h }, physBox(p2)))) return c;
+  }
+  return null;
+}
+const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+/* relationship lines + free connectors, redrawn on every layout change */
+function drawWires() {
+  const links = [];
+  state.phys.forEach(p => {
+    if (!p.link) return;
+    const f = byId(p.link.fileId);
+    if (!f) return;
+    const b = objBox(f);
+    links.push(
+      '<path d="M' + b.cx + ' ' + b.cy + ' L ' + p.x + ' ' + p.y + '" stroke="#FF7454" stroke-width="1.2" ' +
+      'stroke-dasharray="5 5" fill="none" opacity=".75"><animate attributeName="stroke-dashoffset" from="10" to="0" dur="1s" repeatCount="indefinite"/></path>' +
+      '<circle cx="' + b.cx + '" cy="' + b.cy + '" r="3.5" fill="#FF7454"/>' +
+      '<circle cx="' + p.x + '" cy="' + p.y + '" r="6" fill="none" stroke="#FF7454" stroke-width="1.2"/>'
+    );
+  });
+  $('#wLinks').innerHTML = links.join('');
+
+  $('#wConn').innerHTML = state.connectors.map(c => {
+    const a = byId(c.a), b = byId(c.b);
+    if (!a || !b) return '';
+    const A = objBox(a), B = objBox(b);
+    const mx = (A.cx + B.cx) / 2;
+    return '<path d="M' + A.cx + ' ' + A.cy + ' C ' + mx + ' ' + A.cy + ', ' + mx + ' ' + B.cy + ', ' + B.cx + ' ' + B.cy + '" ' +
+           'stroke="#A9C7D6" stroke-width="1.2" fill="none" opacity=".55"/>' +
+           '<circle cx="' + A.cx + '" cy="' + A.cy + '" r="3" fill="#A9C7D6"/>' +
+           '<circle cx="' + B.cx + '" cy="' + B.cy + '" r="3" fill="#A9C7D6"/>';
+  }).join('');
+}
+
+/* ------------------------------- [4] SELECTION / DRAG / OCCLUSION AVOIDANCE */
+let drag = null;
+
+function selectOnly(id) { state.sel.clear(); if (id) state.sel.add(id); renderObjects(); }
+function toggleSel(id)  { state.sel.has(id) ? state.sel.delete(id) : state.sel.add(id); renderObjects(); }
+
+function startObjDrag(e, o) {
+  if (e.button !== 0) return;
+  e.stopPropagation();
+  /* connector tool: clicking objects wires them together instead of dragging */
+  if (state.tool === 'connect') {
+    if (!state.connectFrom) { state.connectFrom = o.id; selectOnly(o.id); toast('Now pick the second object'); }
+    else if (state.connectFrom !== o.id) {
+      state.connectors.push({ id: uid('c'), a: state.connectFrom, b: o.id });
+      logActivity('KC', 'connected ' + byId(state.connectFrom).name + ' to ' + o.name);
+      state.connectFrom = null; setTool(null); drawWires(); toast('Connector added');
+    }
+    return;
+  }
+  if (e.shiftKey) toggleSel(o.id);
+  else if (!state.sel.has(o.id)) selectOnly(o.id);
+
+  const start = screenToWorld(e.clientX, e.clientY);
+  const items = Array.from(state.sel).map(byId).filter(Boolean);
+  drag = {
+    kind: 'obj', o: o, items: items, moved: false,
+    from: items.map(i => ({ o: i, x: i.x, y: i.y })),
+    sx: start.x, sy: start.y
+  };
+  o._el.classList.add('dragging');
+  o.z = ++state.z + 10;
+  o._el.style.zIndex = o.z;
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragEnd, { once: true });
+}
+
+function onDragMove(e) {
+  if (!drag) return;
+  const p = screenToWorld(e.clientX, e.clientY);
+  const dx = p.x - drag.sx, dy = p.y - drag.sy;
+  if (Math.abs(dx) > 3 / state.view.k || Math.abs(dy) > 3 / state.view.k) drag.moved = true;
+  drag.from.forEach(f => { f.o.x = f.x + dx; f.o.y = f.y + dy; f.o._el.style.left = f.o.x + 'px'; f.o._el.style.top = f.o.y + 'px'; });
+
+  /* live occlusion + magnetic-link feedback for the primary dragged object */
+  const o = drag.o, box = objBox(o);
+  let blocked = false, cand = null, bestD = 1e9;
+  state.phys.forEach(ph => {
+    ph._el.classList.remove('candidate', 'occupied');
+    const pb = physBox(ph);
+    if (overlap(box, pb)) blocked = true;
+    if (o.type === 'file' && !ph.link) {
+      const d = Math.hypot(box.cx - ph.x, box.cy - ph.y);
+      if (d < 260 && d < bestD) { bestD = d; cand = ph; }
+    }
+  });
+  if (cand) cand._el.classList.add('candidate');
+  if (blocked) state.phys.forEach(ph => { if (overlap(box, physBox(ph)) && ph !== cand) ph._el.classList.add('occupied'); });
+  const wn = $('.warn', o._el);
+  if (wn) wn.textContent = 'PHYSICAL OBJECT OCCUPYING THIS AREA';
+  o._el.classList.toggle('blocked', blocked && !cand);
+  drag.cand = cand; drag.blocked = blocked;
+  drawWires();
+}
+
+function onDragEnd() {
+  window.removeEventListener('pointermove', onDragMove);
+  if (!drag) return;
+  const o = drag.o;
+  o._el.classList.remove('dragging', 'blocked');
+  state.phys.forEach(ph => ph._el.classList.remove('candidate', 'occupied'));
+
+  if (drag.moved) {
+    /* 1 — never leave a projected interface sitting on top of a real object */
+    const hit = state.phys.find(ph => overlap(objBox(o), physBox(ph)));
+    if (hit) {
+      const f = drag.from.find(i => i.o === o);
+      nudgeAside(o, hit, f ? { x: f.x, y: f.y } : null);
+      toast('Physical object occupying this area', 'warn');
+    }
+    /* 2 — close enough to a free physical object? create the relationship */
+    if (drag.cand && !drag.cand.link && o.type === 'file') linkObjects(drag.cand, o);
+  } else if (o.type === 'file') {
+    openInViewer(o.id);
+  }
+  drag = null;
+  renderObjects();
+}
+
+/* push a project object out to the nearest free edge of a physical object */
+function nudgeAside(o, ph, home) {
+  const pb = physBox(ph), b = objBox(o);
+  const opts = [
+    { x: pb.x + pb.w + 26,  y: o.y },
+    { x: pb.x - b.w - 26,   y: o.y },
+    { x: o.x, y: pb.y + pb.h + 26 },
+    { x: o.x, y: pb.y - b.h - 26 }
+  ].map(c => Object.assign(c, { d: Math.hypot(c.x - o.x, c.y - o.y) })).sort((a, c) => a.d - c.d);
+
+  for (const c of opts) {
+    const test = { x: c.x, y: c.y, w: b.w, h: b.h };
+    if (inSurface(c.x, c.y, b.w, b.h) && !state.phys.some(p2 => overlap(test, physBox(p2)))) {
+      const fx = o.x, fy = o.y;
+      tween(240, t => { o.x = lerp(fx, c.x, t); o.y = lerp(fy, c.y, t); o._el.style.left = o.x + 'px'; o._el.style.top = o.y + 'px'; drawWires(); });
+      return;
+    }
+  }
+  /* nowhere free — return it to where it started */
+  if (home) {
+    const fx = o.x, fy = o.y;
+    tween(240, t => { o.x = lerp(fx, home.x, t); o.y = lerp(fy, home.y, t); o._el.style.left = o.x + 'px'; o._el.style.top = o.y + 'px'; drawWires(); });
+  }
+}
+
+/* ------------------------------------- [5] PHYSICAL <-> DIGITAL LINKING */
+const USE_FOR = {
+  'p-mouse': 'Used as ergonomic reference',
+  'p-book':  'Sketch source for this file',
+  'p-mug':   'Scale + grip reference',
+  'p-phone': 'Photo reference · bezel study'
+};
+
+function linkObjects(ph, o, quiet) {
+  ph.link = { fileId: o.id, use: USE_FOR[ph.id] || 'Linked reference' };
+  ph.note = USE_FOR[ph.id] || 'Linked reference';
+  paintPhysLabel(ph);
+  drawWires();
+  ph._el.classList.add('hot');
+  setTimeout(() => ph._el.classList.remove('hot'), 1400);
+  if (!quiet) {
+    toast(o.name + ' ' + verLabel(o) + ' linked to ' + ph.type, 'link');
+    logActivity('KC', 'linked ' + o.name + ' ' + verLabel(o) + ' to ' + ph.type.charAt(0) + ph.type.slice(1).toLowerCase());
+  }
+}
+
+/* --------------------------------------------------------------------------
+   HAND MOVEMENT OF PHYSICAL OBJECTS
+   This is a mock-up of a real table, so the "real" objects are draggable too.
+   The rule is inverted from digital drags: the physical world wins, and the
+   projection gets out of the way.
+   ------------------------------------------------------------------------ */
+let physDrag = null;
+
+function placePhys(p, x, y) {
+  const e = physExtent(p);
+  p.x = clamp(x, SURFACE.x + e.w / 2, SURFACE.x + SURFACE.w - e.w / 2);
+  p.y = clamp(y, SURFACE.y + e.h / 2, SURFACE.y + SURFACE.h - e.h / 2);
+  p._el.style.left = (p.x - p.w / 2) + 'px';
+  p._el.style.top  = (p.y - p.h / 2) + 'px';
+}
+
+/* keep the projected label inside the mapped surface as the object travels */
+function reflowLabel(p) {
+  const e = physExtent(p), LW = 200, GAP = 30;
+  let side = p.side;
+  if (side === 'right' && p.x + e.w / 2 + GAP + LW > SURFACE.x + SURFACE.w) side = 'left';
+  else if (side === 'left' && p.x - e.w / 2 - GAP - LW < SURFACE.x) side = 'right';
+  if (side === p.side) return;
+  p.side = side;
+  p._lab.classList.toggle('lft', side === 'left');
+  p._lab.style.cssText = (side === 'left' ? 'right' : 'left') + ':calc(100% + ' + GAP + 'px);top:0;' +
+    'transform-origin:' + (side === 'left' ? 'right' : 'left') + ' top;transform:rotate(' + (-p.rot) + 'deg)';
+}
+
+function startPhysDrag(e, p) {
+  if (e.button !== 0 || state.tool) return;
+  e.stopPropagation();
+  const s = screenToWorld(e.clientX, e.clientY);
+  physDrag = { p: p, ox: p.x - s.x, oy: p.y - s.y, moved: false, cand: null, pushed: [] };
+  p._el.classList.add('dragging');
+
+  const mv = ev => {
+    const w = screenToWorld(ev.clientX, ev.clientY);
+    const nx = w.x + physDrag.ox, ny = w.y + physDrag.oy;
+    if (Math.hypot(nx - p.x, ny - p.y) > 1) physDrag.moved = true;
+    placePhys(p, nx, ny);
+    reflowLabel(p);
+
+    /* everything the object is now sitting on will be moved aside */
+    const pb = physBox(p);
+    physDrag.pushed = [];
+    state.objects.forEach(o => {
+      if (!o._el || o.type === 'pin') return;
+      const hit = overlap(objBox(o), pb);
+      const wn = $('.warn', o._el);
+      if (hit && wn) wn.textContent = 'MOVING ASIDE';
+      o._el.classList.toggle('blocked', hit);
+      if (hit) physDrag.pushed.push(o);
+      o._el.classList.remove('linkcand');
+    });
+
+    /* dragging a real object next to a file links them, same as the reverse */
+    let cand = null, best = 1e9;
+    if (!p.link) {
+      state.objects.forEach(o => {
+        if (o.type !== 'file') return;
+        const b = objBox(o), d = Math.hypot(b.cx - p.x, b.cy - p.y);
+        if (d < 300 && d < best) { best = d; cand = o; }
+      });
+    }
+    if (cand) { cand._el.classList.add('linkcand'); cand._el.classList.remove('blocked'); }
+    p._el.classList.toggle('candidate', !!cand);
+    physDrag.cand = cand;
+
+    drawLeaders();
+    drawWires();
+    positionCtx();
+  };
+
+  const up = () => {
+    window.removeEventListener('pointermove', mv);
+    p._el.classList.remove('dragging', 'candidate');
+    $$('#digiLayer .linkcand, #digiLayer .blocked').forEach(n2 => n2.classList.remove('linkcand', 'blocked'));
+    if (!physDrag.moved) { onPhysClick(p); physDrag = null; return; }
+
+    physDrag.pushed.forEach(o => nudgeAside(o, p, null));
+    if (physDrag.pushed.length) {
+      toast(physDrag.pushed.length === 1
+        ? (physDrag.pushed[0].name || 'Note') + ' moved aside'
+        : physDrag.pushed.length + ' projected objects moved aside');
+    }
+    if (physDrag.cand) linkObjects(p, physDrag.cand);
+    logActivity('KC', 'moved the ' + p.type.toLowerCase() + ' on the surface');
+    physDrag = null;
+    drawLeaders();
+    drawWires();
+  };
+  window.addEventListener('pointermove', mv);
+  window.addEventListener('pointerup', up, { once: true });
+}
+
+function onPhysClick(p) {
+  if (state.tool === 'connect') return;
+  if (p.link) {
+    const f = byId(p.link.fileId);
+    if (f) { selectOnly(f.id); openInViewer(f.id); toast('Opened ' + f.name + ' from ' + p.type); }
+  } else {
+    toast(p.type + ' — drag a project file here to link it', 'warn');
+    p._el.classList.add('hot');
+    setTimeout(() => p._el.classList.remove('hot'), 1200);
+  }
+}
+
+/* -------------------------------------------- PAN / ZOOM / EMPTY-SPACE DRAG */
+stage.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  if (e.target.closest('.ui, #ctxbar, .digi, .sticky, .cpin, .phys')) return;
+  if (state.tool === 'pin') { placePin(screenToWorld(e.clientX, e.clientY)); return; }
+  if (state.tool === 'connect') { setTool(null); return; }
+  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: state.view.x, vy: state.view.y, moved: false };
+  stage.style.cursor = 'grabbing';
+  const mv = ev => {
+    state.view.x = drag.vx + (ev.clientX - drag.sx);
+    state.view.y = drag.vy + (ev.clientY - drag.sy);
+    if (Math.abs(ev.clientX - drag.sx) > 3) drag.moved = true;
+    applyView();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', mv);
+    stage.style.cursor = '';
+    if (drag && !drag.moved) { state.sel.clear(); renderObjects(); }
+    drag = null;
+  };
+  window.addEventListener('pointermove', mv);
+  window.addEventListener('pointerup', up, { once: true });
+});
+
+/* canvas zoom — the 3D viewer swallows its own wheel events so the two never fight */
+stage.addEventListener('wheel', e => {
+  if (e.target.closest('.ui')) return;
+  e.preventDefault();
+  const v = state.view;
+  const k2 = clamp(v.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12), .28, 2.6);
+  const r = k2 / v.k;
+  v.x = e.clientX - (e.clientX - v.x) * r;
+  v.y = e.clientY - (e.clientY - v.y) * r;
+  v.k = k2;
+  applyView();
+}, { passive: false });
+
+/* hand light follows the pointer across the surface */
+const lf = $('#lightfield');
+window.addEventListener('pointermove', e => {
+  lf.style.transform = 'translate(' + e.clientX + 'px,' + e.clientY + 'px)';
+});
+
+/* ------------------------------------------------------- [6] CANVAS TOOLS */
+function setTool(t) {
+  state.tool = t;
+  state.connectFrom = null;
+  $$('#toolbar .tb[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  stage.style.cursor = t ? 'crosshair' : '';
+}
+
+function addSticky() {
+  const c = screenToWorld(innerWidth / 2, innerHeight / 2);
+  const o = { id: uid('s'), type: 'sticky', x: c.x - 84, y: c.y - 55, z: ++state.z + 10,
+              owner: 'KC', text: '', thread: [] };
+  state.objects.push(o);
+  renderObjects();
+  selectOnly(o.id);
+  setTimeout(() => { const ta = o._el && $('textarea', o._el); if (ta) ta.focus(); }, 60);
+  logActivity('KC', 'added a note to the surface');
+}
+
+function placePin(pos) {
+  const o = { id: uid('p'), type: 'pin', x: pos.x, y: pos.y, z: ++state.z + 10, n: pinCount() + 1, text: '' };
+  state.objects.push(o);
+  const n = el('div', 'cpin');
+  n.dataset.id = o.id;
+  n.style.cssText = 'left:' + o.x + 'px;top:' + o.y + 'px;z-index:' + o.z;
+  n.innerHTML = '<div class="bub">' + o.n + '</div><div class="ctext"><input placeholder="Add a comment…" ' +
+                'style="width:100%;background:transparent;border:0;outline:none;color:var(--cream);font-family:var(--f-mono);font-size:10.5px"></div>';
+  pinLayer.appendChild(n);
+  o._el = n;
+  const inp = $('input', n);
+  const commit = () => {
+    o.text = inp.value.trim();
+    $('.ctext', n).innerHTML = o.text || '<span style="opacity:.4">Empty note</span>';
+    if (o.text) logActivity('KC', 'pinned “' + o.text.slice(0, 40) + '” to the table');
+  };
+  inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { commit(); inp.blur(); } });
+  inp.addEventListener('blur', commit);
+  inp.addEventListener('pointerdown', ev => ev.stopPropagation());
+  n.addEventListener('pointerdown', ev => { ev.stopPropagation(); selectOnly(o.id); n.classList.add('selected'); });
+  setTimeout(() => inp.focus(), 50);
+  setTool(null);
+  return o;
+}
+const pinCount = () => state.objects.filter(o => o.type === 'pin').length;
+
+function duplicateSel() {
+  const made = [];
+  Array.from(state.sel).map(byId).filter(o => o && o.type !== 'pin').forEach(o => {
+    const c = Object.assign({}, o, { id: uid('d'), x: o.x + 40, y: o.y + 40, z: ++state.z + 10, _el: null,
+                                     thread: (o.thread || []).map(t => Object.assign({}, t)) });
+    state.objects.push(c);
+    made.push(c.id);
+  });
+  state.sel = new Set(made);
+  renderObjects();
+  if (made.length) toast('Duplicated ' + made.length + ' object' + (made.length > 1 ? 's' : ''));
+}
+
+function deleteSel() {
+  const ids = Array.from(state.sel);
+  if (!ids.length) return;
+  ids.forEach(id => {
+    const o = byId(id);
+    if (!o) return;
+    if (o._el) o._el.remove();
+    state.phys.forEach(p => { if (p.link && p.link.fileId === id) { p.link = null; p.note = 'Unlinked object'; paintPhysLabel(p); } });
+    state.connectors = state.connectors.filter(c => c.a !== id && c.b !== id);
+    state.objects.splice(state.objects.indexOf(o), 1);
+  });
+  state.sel.clear();
+  if (!byId(state.viewing)) { const f = state.objects.find(o => o.type === 'file'); if (f) openInViewer(f.id); }
+  renderObjects();
+  toast('Removed ' + ids.length + ' object' + (ids.length > 1 ? 's' : ''));
+}
+
+function zOrder(dir) {
+  Array.from(state.sel).map(byId).filter(Boolean).forEach(o => {
+    o.z = dir > 0 ? ++state.z + 10 : Math.max(1, Math.min.apply(null, state.objects.map(x => x.z)) - 1);
+  });
+  renderObjects();
+}
+
+/* ---------------------------------------------------- CONTEXT TOOLBAR */
+const ctxbar = $('#ctxbar');
+function buildCtx() {
+  const one = state.sel.size === 1 ? byId(Array.from(state.sel)[0]) : null;
+  const items = [];
+  if (one && one.type === 'file') items.push({ i: ICON.cube, l: 'OPEN IN 3D', f: () => openInViewer(one.id) });
+  items.push({ i: ICON.copy,  l: 'DUPLICATE', f: duplicateSel });
+  items.push({ i: ICON.front, l: '',          f: () => zOrder(1),  t: 'Bring forward' });
+  items.push({ i: ICON.back,  l: '',          f: () => zOrder(-1), t: 'Send backward' });
+  items.push({ i: ICON.trash, l: 'DELETE',    f: deleteSel, d: true });
+  ctxbar.innerHTML = '';
+  items.forEach(it => {
+    const b = el('button', 'cb rippler' + (it.d ? ' danger' : ''), svgIcon(it.i) + (it.l ? '<span>' + it.l + '</span>' : ''));
+    if (it.t) b.title = it.t;
+    b.addEventListener('click', e => { e.stopPropagation(); it.f(); });
+    ctxbar.appendChild(b);
+  });
+}
+let ctxSig = '';
+function positionCtx() {
+  const sel = Array.from(state.sel).map(byId).filter(o => o && o.type !== 'pin');
+  if (!sel.length) { ctxbar.classList.remove('show'); ctxSig = ''; return; }
+  const sig = sel.map(o => o.id).join(',');
+  if (sig !== ctxSig) { ctxSig = sig; buildCtx(); }
+  let minX = 1e9, minY = 1e9, maxX = -1e9;
+  sel.forEach(o => { const b = objBox(o); minX = Math.min(minX, b.x); maxX = Math.max(maxX, b.x + b.w); minY = Math.min(minY, b.y); });
+  const v = state.view;
+  ctxbar.classList.add('show');
+  ctxbar.style.left = (v.x + ((minX + maxX) / 2) * v.k) + 'px';
+  ctxbar.style.top  = (v.y + minY * v.k - 22) + 'px';
+}
+
+/* --------------------------------------------------------- SURFACE TOOLBAR */
+function buildToolbar() {
+  const tb = $('#toolbar');
+  const mk = (o) => {
+    const b = el('button', 'tb rippler' + (o.cls || ''), svgIcon(o.i) + (o.l ? '<span class="lbl">' + o.l + '</span>' : ''));
+    if (o.tool) b.dataset.tool = o.tool;
+    if (o.id) b.id = o.id;
+    b.title = o.t || o.l || '';
+    b.addEventListener('click', o.f);
+    tb.appendChild(b);
+    return b;
+  };
+  const detBtn = mk({ i: ICON.eye, l: 'DETECTION', t: 'Toggle object detection overlays', cls: ' on', f: () => {
+    state.detect = !state.detect;
+    document.body.classList.toggle('no-detect', !state.detect);
+    detBtn.classList.toggle('on', state.detect);
+    toast(state.detect ? 'Object detection on' : 'Object detection off');
+  }});
+  mk({ i: ICON.note, l: 'NOTE', t: 'Add a sticky note', f: addSticky });
+  mk({ i: ICON.link, l: 'CONNECT', t: 'Draw a connector between two objects', tool: 'connect', f: () => {
+    setTool(state.tool === 'connect' ? null : 'connect');
+    if (state.tool) toast('Pick the first object');
+  }});
+  mk({ i: ICON.pin, l: 'PIN', t: 'Drop a comment pin on the table', tool: 'pin', f: () => {
+    setTool(state.tool === 'pin' ? null : 'pin');
+    if (state.tool) toast('Tap the table to place a comment');
+  }});
+  tb.appendChild(el('span', 'tbsep'));
+  mk({ i: ICON.reset, l: 'RESET VIEW', t: 'Recentre the surface', f: () => { resetView(true); toast('View reset'); } });
+  tb.appendChild(el('span', 'tbsep'));
+  mk({ i: ICON.play, l: 'RUN DEMO', cls: ' accent', id: 'demoBtn', t: 'Play the 30-second walkthrough', f: () => {
+    state.demo.running ? stopDemo(true) : runDemo();
+  }});
+}
+
+/* ------------------------------------------------------------ ACTIVITY FEED */
+function logActivity(who, what, when) {
+  const row = el('div', 'act fresh',
+    '<span class="who">' + PEOPLE[who].name + '</span><span>' + what + (when ? ' <span style="opacity:.45">· ' + when + '</span>' : ' <span style="opacity:.45">· now</span>') + '</span>');
+  $('#actList').appendChild(row);
+  const list = $('#actList');
+  while (list.children.length > 7) list.firstChild.remove();
+  setTimeout(() => row.classList.remove('fresh'), 700);
+}
+
+/* --------------------------------------------------------------- TOASTS */
+let toastT = 0;
+function toast(msg, kind) {
+  const t = el('div', 'tst' + (kind ? ' ' + kind : ''), msg.toUpperCase());
+  $('#toast').appendChild(t);
+  clearTimeout(toastT);
+  setTimeout(() => { t.style.transition = 'opacity .35s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, 2100);
+}
+
+/* ------------------------------------------------- RIPPLE + KEYBOARD */
+document.addEventListener('pointerdown', e => {
+  const t = e.target.closest('.rippler, .tb, .cb, .vt, .mini, .bp');
+  if (!t) return;
+  const r = t.getBoundingClientRect();
+  const rip = el('span', 'rip');
+  rip.style.left = (e.clientX - r.left) + 'px';
+  rip.style.top  = (e.clientY - r.top) + 'px';
+  t.appendChild(rip);
+  setTimeout(() => rip.remove(), 560);
+});
+
+document.addEventListener('keydown', e => {
+  const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+  if (typing) { if (e.key === 'Escape') document.activeElement.blur(); return; }
+  if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); deleteSel(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSel(); }
+  if (e.key === 'Escape') { state.sel.clear(); setTool(null); renderObjects(); }
+  if (e.key === '0') resetView(true);
+  if (e.key.toLowerCase() === 'n') addSticky();
+});
+
+/* --------------------------------------------------------------- PRESENCE */
+function startPresence() {
+  const who = [{ k: 'MT' }, { k: 'AL' }];
+  who.forEach((p, i) => {
+    const c = el('div', 'cursor');
+    c.innerHTML = '<svg viewBox="0 0 16 21"><path d="M1 1 L1 18 L5.5 13.6 L8.6 20 L11.4 18.6 L8.4 12.6 L14.5 12.4 Z" fill="' +
+      PEOPLE[p.k].color + '" stroke="#111417" stroke-width="1"/></svg>' +
+      '<span class="tag" style="background:' + PEOPLE[p.k].color + '">' + p.k + '</span>';
+    worldEl.appendChild(c);
+    p.el = c;
+    const roam = () => {
+      const x = 220 + Math.random() * 1150, y = 160 + Math.random() * 720;
+      c.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+      setTimeout(roam, 2600 + Math.random() * 2600);
+    };
+    setTimeout(roam, 400 + i * 900);
+  });
+}
+
+/* ==================================================== [7] BOXIC 3D VIEWER */
+const V = {
+  ok: false, mode: 'orbit', wire: false, explode: 0, explodeT: 0,
+  section: false, sectionT: 0, sectionK: 0,
+  theta: 0.85, phi: 1.05, radius: 6, autoSpin: 0,
+  pins: [], strokes: [], stroke: null, pending: null
+};
+const vStage = $('#vStage'), vCanvas = $('#vCanvas'), vDraw = $('#vDraw'), vPins = $('#vPins');
+
+/* --- procedural mechanical models --------------------------------------- */
+function makeMat(hex, opts) {
+  return new THREE.MeshStandardMaterial(Object.assign({
+    color: hex, roughness: .52, metalness: .28, side: THREE.DoubleSide
+  }, opts || {}));
+}
+function buildModel(key) {
+  const g = new THREE.Group();
+  const body = makeMat(0xC6D9E3), accent = makeMat(0xA9C7D6), dark = makeMat(0x54666F, { roughness: .7, metalness: .5 });
+  const add = (geo, mat, x, y, z, rx, ry, rz) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    if (rx || ry || rz) m.rotation.set(rx || 0, ry || 0, rz || 0);
+    g.add(m);
+    return m;
+  };
+  if (key === 'hinge') {
+    add(new THREE.BoxGeometry(3.4, .34, 1.5), body, 0, -.5, 0);
+    add(new THREE.BoxGeometry(3.4, .34, 1.5), body, 0, .78, 0);
+    [-1.15, 0, 1.15].forEach((z, i) => {
+      add(new THREE.CylinderGeometry(.42, .42, .74, 28), i === 1 ? accent : body, -0.0, .14, z * .78, 0, 0, Math.PI / 2);
+    });
+    add(new THREE.CylinderGeometry(.17, .17, 3.1, 20), dark, 0, .14, 0, 0, 0, Math.PI / 2);
+    [-1.3, 1.3].forEach(x => {
+      add(new THREE.CylinderGeometry(.16, .16, .5, 16), dark, x, -.5, .5);
+      add(new THREE.CylinderGeometry(.16, .16, .5, 16), dark, x, .78, -.5);
+    });
+    add(new THREE.BoxGeometry(1.2, .2, .5), accent, 0, .95, 0);
+  } else if (key === 'handle') {
+    add(new THREE.BoxGeometry(.7, .8, .8), body, -1.7, 0, 0);
+    add(new THREE.BoxGeometry(.7, .8, .8), body, 1.7, 0, 0);
+    add(new THREE.CylinderGeometry(.3, .3, 3.4, 24), accent, 0, .32, 0, 0, 0, Math.PI / 2);
+    add(new THREE.CylinderGeometry(.36, .36, 1.5, 24), body, 0, .32, 0, 0, 0, Math.PI / 2);
+    add(new THREE.BoxGeometry(3.2, .22, .5), body, 0, -.42, 0);
+  } else if (key === 'enclosure') {
+    add(new THREE.BoxGeometry(3.2, .9, 2.2), body, 0, -.25, 0);
+    add(new THREE.BoxGeometry(3.05, .34, 2.05), accent, 0, .38, 0);
+    for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(1.4, .1, .1), dark, -.5, .56, -.6 + i * .3);
+    add(new THREE.CylinderGeometry(.22, .22, .35, 20), dark, 1.6, -.2, 0, 0, 0, Math.PI / 2);
+    add(new THREE.BoxGeometry(.5, .3, .5), dark, -1.3, .6, .6);
+  } else if (key === 'mount') {
+    add(new THREE.BoxGeometry(2.8, .3, 2.8), body, 0, -.4, 0);
+    add(new THREE.CylinderGeometry(.85, .95, 1.1, 30), accent, 0, .3, 0);
+    add(new THREE.CylinderGeometry(.5, .5, 1.3, 30), dark, 0, .35, 0);
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(c =>
+      add(new THREE.CylinderGeometry(.2, .2, .5, 16), dark, c[0] * 1.05, -.4, c[1] * 1.05));
+    [[0, 1], [1, 0]].forEach(r =>
+      add(new THREE.BoxGeometry(r[0] ? 2.4 : .28, .5, r[1] ? 2.4 : .28), body, 0, -.1, 0));
+  } else if (key === 'cmf') {
+    const cols = [0xA9C7D6, 0xFF7454, 0xF4B52A, 0xF2EDE4];
+    add(new THREE.BoxGeometry(3.4, .2, 2.4), makeMat(0x8FABBA), 0, -.3, 0);
+    cols.forEach((c, i) =>
+      add(new THREE.BoxGeometry(1.4, .16, .9), makeMat(c, { roughness: i === 3 ? .8 : .35 }),
+          i % 2 ? .8 : -.8, -.1, i < 2 ? -.55 : .55));
+  } else { /* notes */
+    add(new THREE.BoxGeometry(2.6, .08, 3.4), makeMat(0xF2EDE4, { roughness: .9, metalness: 0 }), -.16, -.2, .16);
+    add(new THREE.BoxGeometry(2.6, .08, 3.4), makeMat(0xE2DACB, { roughness: .9, metalness: 0 }), 0, 0, 0);
+    add(new THREE.BoxGeometry(2.6, .08, 3.4), makeMat(0xA9C7D6, { roughness: .8, metalness: .1 }), .16, .2, -.16);
+    for (let i = 0; i < 6; i++) add(new THREE.BoxGeometry(1.7, .02, .05), makeMat(0x54666F), 0, .26, -1.1 + i * .42);
+  }
+
+  /* technical edge overlay + per-part explode vector */
+  const box = new THREE.Box3().setFromObject(g), c = box.getCenter(new THREE.Vector3());
+  g.children.slice().forEach(m => {
+    if (!m.isMesh) return;
+    m.userData.base = m.position.clone();
+    m.userData.dir = m.position.clone().sub(c).normalize().multiplyScalar(1);
+    if (m.userData.dir.lengthSq() < .01) m.userData.dir.set(0, 1, 0);
+    const eg = new THREE.LineSegments(
+      new THREE.EdgesGeometry(m.geometry, 28),
+      new THREE.LineBasicMaterial({ color: 0x15191D, transparent: true, opacity: .55 })
+    );
+    m.add(eg);
+  });
+  return g;
+}
+
+function initViewer() {
+  if (window.__threeFailed || typeof THREE === 'undefined') { viewerFallback(); return; }
+  try {
+    V.renderer = new THREE.WebGLRenderer({ canvas: vCanvas, antialias: true, alpha: true });
+  } catch (err) { viewerFallback(); return; }
+  V.renderer.setClearColor(0x000000, 0);
+  V.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  V.scene = new THREE.Scene();
+  V.camera = new THREE.PerspectiveCamera(38, 1, .1, 100);
+  V.target = new THREE.Vector3(0, 0, 0);
+
+  V.scene.add(new THREE.HemisphereLight(0xA9C7D6, 0x14181C, 1.05));
+  const key = new THREE.DirectionalLight(0xFFFFFF, .85); key.position.set(5, 8, 6); V.scene.add(key);
+  const rim = new THREE.DirectionalLight(0xFF7454, .35); rim.position.set(-6, 2, -5); V.scene.add(rim);
+  const fill = new THREE.DirectionalLight(0xA9C7D6, .3); fill.position.set(-4, -3, 4); V.scene.add(fill);
+
+  V.plane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 3);
+  V.raycaster = new THREE.Raycaster();
+  V.ok = true;
+  loadModel(byId(state.viewing));
+  sizeViewer();
+  (function loop() {
+    requestAnimationFrame(loop);
+    renderViewer();
+  })();
+}
+
+function viewerFallback() {
+  V.ok = false;
+  vCanvas.style.display = 'none';
+  const f = el('div', '', '');
+  f.id = 'vFallback';
+  f.style.cssText = 'position:absolute;inset:0;display:grid;place-items:center;';
+  vStage.insertBefore(f, vPins);
+  $('#vHint').textContent = '3D RUNTIME OFFLINE · STATIC VIEW';
+  paintFallback();
+}
+function paintFallback() {
+  const f = $('#vFallback');
+  if (!f) return;
+  const o = byId(state.viewing);
+  f.innerHTML = isoSVG(o.model, 260, 200);
+  const s = $('svg', f);
+  s.style.filter = 'drop-shadow(0 0 34px rgba(169,199,214,.25))';
+  s.style.opacity = V.wire ? '.4' : '1';
+}
+
+function sizeViewer() {
+  const w = vStage.clientWidth, h = vStage.clientHeight;
+  if (V.ok) {
+    V.renderer.setSize(w, h, false);
+    V.camera.aspect = w / h;
+    V.camera.updateProjectionMatrix();
+  }
+  vDraw.width = w; vDraw.height = h;
+  redrawStrokes();
+}
+
+function loadModel(o) {
+  if (!V.ok) { paintFallback(); return; }
+  if (V.group) V.scene.remove(V.group);
+  V.group = buildModel(o.model);
+  V.scene.add(V.group);
+  fitModel();
+  applyWire();
+}
+
+function fitModel() {
+  if (!V.ok || !V.group) return;
+  const box = new THREE.Box3().setFromObject(V.group);
+  const sph = box.getBoundingSphere(new THREE.Sphere());
+  V.target.copy(sph.center);
+  V.radius = sph.radius / Math.sin((V.camera.fov * Math.PI / 180) / 2) * 1.15;
+}
+
+function applyWire() {
+  if (!V.ok) { paintFallback(); return; }
+  V.group.traverse(m => { if (m.isMesh) m.material.wireframe = V.wire; });
+}
+
+function renderViewer() {
+  if (!V.ok) return;
+  /* smooth explode + section transitions */
+  V.explodeT = lerp(V.explodeT, V.explode, .12);
+  V.sectionT = lerp(V.sectionT, V.section ? 1 : 0, .1);
+  V.group.children.forEach(m => {
+    if (!m.isMesh || !m.userData.base) return;
+    m.position.copy(m.userData.base).addScaledVector(m.userData.dir, V.explodeT * 1.5);
+  });
+  V.plane.constant = lerp(4, 0.05, V.sectionT);
+  V.renderer.clippingPlanes = V.sectionT > .02 ? [V.plane] : [];
+
+  V.theta += V.autoSpin;
+  V.phi = clamp(V.phi, .18, Math.PI - .18);
+  const r = V.radius;
+  V.camera.position.set(
+    V.target.x + r * Math.sin(V.phi) * Math.sin(V.theta),
+    V.target.y + r * Math.cos(V.phi),
+    V.target.z + r * Math.sin(V.phi) * Math.cos(V.theta)
+  );
+  V.camera.lookAt(V.target);
+  V.renderer.render(V.scene, V.camera);
+  layoutPins();
+}
+
+/* ------------------------------------- viewer input: orbit / zoom / modes */
+let vDragState = null;
+vStage.addEventListener('pointerdown', e => {
+  if (e.target.closest('.vpin')) return;
+  if (V.mode === 'comment') { tryPlaceViewerPin(e); return; }
+  if (V.mode === 'draw') { startStroke(e); return; }
+  if (!V.ok) return;                       /* static fallback: nothing to orbit */
+  vDragState = { x: e.clientX, y: e.clientY, th: V.theta, ph: V.phi, tx: V.target.x, ty: V.target.y, pan: V.mode === 'pan' };
+  V.autoSpin = 0;
+  vStage.classList.add('orbiting');
+  const mv = ev => {
+    const dx = ev.clientX - vDragState.x, dy = ev.clientY - vDragState.y;
+    if (vDragState.pan) {
+      V.target.x = vDragState.tx - dx * .01 * V.radius / 3;
+      V.target.y = vDragState.ty + dy * .01 * V.radius / 3;
+    } else {
+      V.theta = vDragState.th - dx * .008;
+      V.phi   = vDragState.ph - dy * .008;
+    }
+  };
+  const up = () => { window.removeEventListener('pointermove', mv); vStage.classList.remove('orbiting'); vDragState = null; };
+  window.addEventListener('pointermove', mv);
+  window.addEventListener('pointerup', up, { once: true });
+});
+/* viewer wheel is captured here so it never reaches the surface canvas */
+vStage.addEventListener('wheel', e => {
+  e.preventDefault(); e.stopPropagation();
+  V.radius = clamp(V.radius * (e.deltaY < 0 ? .9 : 1.11), 2.2, 26);
+}, { passive: false });
+
+/* --------------------------------------------- [8] ANNOTATION + COMMENTS */
+function pinScreenPos(pin) {
+  const w = vStage.clientWidth, h = vStage.clientHeight;
+  if (!V.ok) return { x: (0.5 + pin.p[0] * .3) * w, y: (0.5 - pin.p[1] * .3) * h, vis: true };
+  const v = new THREE.Vector3(pin.p[0], pin.p[1], pin.p[2]).applyMatrix4(V.group.matrixWorld).project(V.camera);
+  return { x: (v.x * .5 + .5) * w, y: (-v.y * .5 + .5) * h, vis: v.z < 1 };
+}
+function layoutPins() {
+  V.pins.forEach(p => {
+    if (!p._el) return;
+    const s = pinScreenPos(p);
+    p._el.style.left = s.x + 'px';
+    p._el.style.top  = s.y + 'px';
+    p._el.style.opacity = s.vis ? 1 : 0;
+  });
+}
+function renderPins() {
+  vPins.innerHTML = '';
+  V.pins.forEach(p => {
+    const n = el('div', 'vpin', String(p.n));
+    n.title = p.text;
+    n.addEventListener('click', () => flashComment(p.n));
+    vPins.appendChild(n);
+    p._el = n;
+  });
+  layoutPins();
+}
+function renderThread() {
+  const o = byId(state.viewing);
+  $('#vThread').innerHTML = o.thread.map(c =>
+    '<div class="cmt" data-n="' + c.n + '"><span class="n">' + c.n + '</span>' +
+    '<span class="t">' + c.text + '<em>' + PEOPLE[c.who].name.toUpperCase() + ' · ' + c.at + '</em></span></div>'
+  ).join('') || '<div class="cmt"><span class="t" style="opacity:.5">No comments yet. Use the comment tool to pin one to the model.</span></div>';
+  $$('#vThread .cmt').forEach(n => n.addEventListener('click', () => flashComment(+n.dataset.n)));
+}
+function flashComment(n) {
+  const p = V.pins.find(x => x.n === n);
+  if (p && p._el) { p._el.style.transform = 'scale(1.45)'; setTimeout(() => p._el.style.transform = '', 320); }
+  const row = $('#vThread .cmt[data-n="' + n + '"]');
+  if (row) { row.style.background = 'rgba(255,116,84,.16)'; setTimeout(() => row.style.background = '', 500); }
+}
+
+function tryPlaceViewerPin(e) {
+  const r = vStage.getBoundingClientRect();
+  const o = byId(state.viewing);
+  let p;
+  if (V.ok) {
+    const m = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    V.raycaster.setFromCamera(m, V.camera);
+    const hit = V.raycaster.intersectObjects(V.group.children, true)[0];
+    if (!hit) { toast('Tap the model to place a comment', 'warn'); return; }
+    p = V.group.worldToLocal(hit.point.clone()).toArray();
+  } else {
+    p = [((e.clientX - r.left) / r.width - .5) / .3, -((e.clientY - r.top) / r.height - .5) / .3, 0];
+  }
+  V.pending = { n: o.thread.length + 1, p: p, who: 'KC', at: 'now' };
+  $('#cmpN').textContent = V.pending.n;
+  $('#composer').classList.add('show');
+  $('#cmpText').value = '';
+  $('#cmpText').focus();
+}
+$('#cmpSave').addEventListener('click', () => {
+  const txt = $('#cmpText').value.trim();
+  if (!txt || !V.pending) { closeComposer(); return; }
+  const o = byId(state.viewing);
+  const c = Object.assign({}, V.pending, { text: txt, at: 'now' });
+  o.thread.push(c);
+  V.pins.push(c);
+  renderPins(); renderThread(); renderObjects();
+  logActivity('KC', 'commented on ' + o.name + ' ' + verLabel(o));
+  toast('Comment posted to ' + o.name);
+  closeComposer();
+  setViewerMode('orbit');
+});
+$('#cmpCancel').addEventListener('click', () => { closeComposer(); setViewerMode('orbit'); });
+function closeComposer() { $('#composer').classList.remove('show'); V.pending = null; }
+
+/* --- freehand annotation over the model --------------------------------- */
+function startStroke(e) {
+  const r = vStage.getBoundingClientRect();
+  V.stroke = { pts: [[e.clientX - r.left, e.clientY - r.top]] };
+  const mv = ev => {
+    V.stroke.pts.push([ev.clientX - r.left, ev.clientY - r.top]);
+    redrawStrokes();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', mv);
+    if (V.stroke && V.stroke.pts.length > 2) {
+      V.strokes.push(V.stroke);
+      logActivity('KC', 'sketched over ' + byId(state.viewing).name);
+    }
+    V.stroke = null;
+    redrawStrokes();
+  };
+  window.addEventListener('pointermove', mv);
+  window.addEventListener('pointerup', up, { once: true });
+}
+function redrawStrokes() {
+  const c = vDraw.getContext('2d');
+  c.clearRect(0, 0, vDraw.width, vDraw.height);
+  c.strokeStyle = '#FF7454'; c.lineWidth = 2; c.lineCap = 'round'; c.lineJoin = 'round';
+  const all = V.strokes.concat(V.stroke ? [V.stroke] : []);
+  all.forEach(s => {
+    c.beginPath();
+    s.pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]));
+    c.stroke();
+  });
+}
+
+/* --------------------------------------------------------- VIEWER TOOLBAR */
+function setViewerMode(m) {
+  V.mode = m;
+  vStage.classList.toggle('mode-comment', m === 'comment');
+  vStage.classList.toggle('mode-draw', m === 'draw');
+  $$('#vTools .vt[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  $('#vHint').textContent =
+    m === 'comment' ? 'TAP THE MODEL TO PIN A COMMENT' :
+    m === 'draw'    ? 'DRAG TO SKETCH OVER THE MODEL'  :
+    m === 'pan'     ? 'DRAG TO PAN'                    :
+    m === 'zoom'    ? 'SCROLL TO ZOOM'                 : 'DRAG TO ORBIT · SCROLL TO ZOOM';
+  if (m !== 'comment') closeComposer();
+}
+function buildViewerTools() {
+  const wrap = $('#vTools'), util = $('#vUtil');
+  const mk = (icon, tip, fn, mode, id, toUtil) => {
+    const b = el('button', toUtil ? 'vu' : 'vt', svgIcon(icon));
+    b.dataset.tip = tip;
+    if (mode) b.dataset.mode = mode;
+    if (id) b.id = id;
+    b.addEventListener('click', fn);
+    (toUtil ? util : wrap).appendChild(b);
+    return b;
+  };
+  mk(ICON.orbit, 'ORBIT', () => setViewerMode('orbit'), 'orbit');
+  mk(ICON.pan,   'PAN',   () => setViewerMode('pan'),   'pan');
+  mk(ICON.zoom,  'ZOOM',  () => { setViewerMode('zoom'); V.radius = clamp(V.radius * .82, 2.2, 26); }, 'zoom');
+  mk(ICON.fit,   'FIT',   () => { fitModel(); V.theta = .85; V.phi = 1.05; toast('Model fitted'); });
+  const ex = mk(ICON.explode, 'EXPLODE', () => {
+    V.explode = V.explode > 0 ? 0 : 1;
+    ex.classList.toggle('on', V.explode > 0);
+    if (!V.ok) paintFallback();
+    toast(V.explode ? 'Exploded view' : 'Assembled view');
+  });
+  const sec = mk(ICON.section, 'SECTION', () => {
+    V.section = !V.section;
+    sec.classList.toggle('on', V.section);
+    toast(V.section ? 'Section view' : 'Section off');
+  });
+  const wf = mk(ICON.cube, 'WIREFRAME', () => {
+    V.wire = !V.wire; applyWire();
+    wf.classList.toggle('on', V.wire);
+  }, null, null, true);
+  mk(ICON.draw, 'DRAW', () => setViewerMode(V.mode === 'draw' ? 'orbit' : 'draw'), 'draw');
+  mk(ICON.pin, 'COMMENT', () => setViewerMode(V.mode === 'comment' ? 'orbit' : 'comment'), 'comment');
+  mk(ICON.reset, 'RESET CAMERA', () => {
+    V.theta = .85; V.phi = 1.05; V.explode = 0; V.section = false; V.wire = false;
+    V.strokes = []; redrawStrokes(); applyWire(); fitModel();
+    $$('#vTools .vt, #vUtil .vu').forEach(b => { if (!b.dataset.mode) b.classList.remove('on'); });
+    setViewerMode('orbit');
+    toast('Camera reset');
+  }, null, null, true);
+}
+
+/* ------------------------------------ SHARED STATE: open a file in the viewer */
+function openInViewer(id) {
+  const o = byId(id);
+  if (!o || o.type !== 'file') return;
+  state.viewing = id;
+  $('#vTitle').textContent = fileTitle(o);
+  $('#vVer').textContent = 'Version ' + o.ver;
+  const st = $('#vStatus');
+  st.textContent = o.status;
+  st.style.color = STATUS[o.status] || '#A9C7D6';
+  V.pins = o.thread.slice();
+  V.strokes = []; redrawStrokes();
+  loadModel(o);
+  renderPins(); renderThread(); renderObjects();
+  $('#bCtx').textContent = 'SELECTED · ' + fileTitle(o) + ' ' + verLabel(o).toUpperCase();
+}
+
+/* version stepper — changing a version updates the header and the record */
+function stepVersion(d) {
+  const o = byId(state.viewing);
+  const next = clamp(o.ver + d, 1, 99);
+  if (next === o.ver) return;
+  o.ver = next;
+  o.updated = 'just now';
+  if (d > 0) { o.status = 'In Review'; }
+  openInViewer(o.id);
+  logActivity('KC', (d > 0 ? 'published ' : 'rolled back ') + o.name + ' ' + verLabel(o));
+  toast(o.name + ' now at ' + verLabel(o));
+}
+$('#verUp').addEventListener('click', () => stepVersion(1));
+$('#verDown').addEventListener('click', () => stepVersion(-1));
+
+/* ==================================================== [9] BOXIE ASSISTANT */
+const boxiePanel = $('#boxiePanel'), bLog = $('#bLog');
+const PROMPTS = [
+  'Why was Hinge Housing v12 changed?',
+  'What still needs approval?',
+  'Connect this sketchbook to the latest concept file.'
+];
+
+function boxieOpen(open) {
+  const want = open == null ? !boxiePanel.classList.contains('show') : open;
+  boxiePanel.classList.toggle('show', want);
+  if (want) {
+    const o = byId(state.viewing);
+    $('#bCtx').textContent = 'SELECTED · ' + fileTitle(o) + ' ' + verLabel(o).toUpperCase();
+    if (!bLog.children.length) {
+      bSay('a', 'I have the table in view — <b>4 physical objects</b> and <b>' +
+        state.objects.filter(x => x.type === 'file').length + ' project files</b>. Ask me anything about the espresso maker.');
+    }
+    setTimeout(() => $('#bInput').focus(), 120);
+  }
+}
+$('#boxieBtn').addEventListener('click', () => boxieOpen());
+
+function bSay(role, html) {
+  const n = el('div', 'bmsg ' + role, html);
+  bLog.appendChild(n);
+  bLog.scrollTop = bLog.scrollHeight;
+  return n;
+}
+function bThinking() {
+  const n = el('div', 'bmsg a typing', '<span></span><span></span><span></span>');
+  bLog.appendChild(n);
+  bLog.scrollTop = bLog.scrollHeight;
+  return n;
+}
+
+/* Simulated project memory. Answers are grounded in what is on the table. */
+function boxieAnswer(q) {
+  const s = q.toLowerCase();
+  const cur = byId(state.viewing);
+  const pending = state.objects.filter(o => o.type === 'file' && /Review/.test(o.status));
+
+  if (/why|change|v12|thickness|hinge/.test(s)) {
+    return { html:
+      'The hinge wall thickness increased from <b>2.0 mm</b> to <b>2.5 mm</b> after the <b>June 18 supplier review</b>. ' +
+      'The change reduced deformation in Prototype 3.\n\n' +
+      '<span class="hl">Decision owner:</span> Ken · logged against Hinge Housing v12.' };
+  }
+  if (/approv|sign.?off|pending|blocked/.test(s)) {
+    return { html:
+      'Two items still need approval:\n' +
+      '<b>1. Hinge Housing v12</b> — waiting on Maya\n' +
+      '<b>2. Electronics Enclosure v18</b> — waiting on the supplier\n\n' +
+      'Motor Mount v05 was approved by Alex yesterday.' };
+  }
+  if (/connect|link|sketchbook|concept/.test(s)) {
+    return {
+      html: 'Linking the <b>sketchbook</b> on the table to <b>CMF Direction Board v03</b>, the latest concept file.\n\n' +
+            'The sketchbook is now part of the concept trail — anyone reviewing CMF direction will see it.',
+      act: () => {
+        const book = physById('p-book'), cmf = byId('f-cmf');
+        if (book && cmf && !book.link) {
+          book.note = 'Sketch source for this file';
+          linkObjects(book, cmf, true);
+          logActivity('KC', 'linked CMF Direction Board v03 to Sketchbook');
+          toast('Sketchbook linked to CMF Direction Board', 'link');
+        }
+      }
+    };
+  }
+  if (/mouse|ergonom|handle/.test(s)) {
+    const m = physById('p-mouse');
+    return { html: m.link
+      ? 'The <b>mouse</b> on the table is linked to <b>Handle Assembly v07</b> as an ergonomic reference. Maya requested changes to the grip diameter on July 9.'
+      : 'The <b>mouse</b> is detected but not linked yet. Drag Handle Assembly v07 beside it and I will record it as an ergonomic reference.' };
+  }
+  if (/table|surface|object|what.*see/.test(s)) {
+    const linked = state.phys.filter(p => p.link).length;
+    return { html:
+      'On the table right now: <b>' + state.phys.map(p => p.type.toLowerCase()).join(', ') + '</b>.\n' +
+      linked + ' of ' + state.phys.length + ' are linked to project files. ' +
+      'The rest are detected but unassigned.' };
+  }
+  if (/next|todo|do next|status/.test(s)) {
+    return { html:
+      'Next for this project:\n' +
+      '<b>1.</b> Maya reviews ' + cur.name + ' ' + verLabel(cur) + '\n' +
+      '<b>2.</b> Supplier returns tolerance feedback on the enclosure\n' +
+      '<b>3.</b> Prototype 4 build starts once the hinge is signed off.' };
+  }
+  return { html:
+    'Current selection is <b>' + cur.name + ' ' + verLabel(cur) + '</b> (' + cur.status.toLowerCase() + ', ' +
+    cur.thread.length + ' comments, owned by ' + PEOPLE[cur.owner].name + ').\n' +
+    'Ask me about the change history, what needs approval, or how something on the table connects to the project.' };
+}
+
+async function boxieAsk(q) {
+  bSay('u', q);
+  const t = bThinking();
+  await wait(760);
+  t.remove();
+  const a = boxieAnswer(q);
+  bSay('a', a.html);
+  if (a.act) a.act();
+}
+function buildPrompts() {
+  const wrap = $('#bPrompts');
+  PROMPTS.forEach(p => {
+    const b = el('button', 'bp', p);
+    b.addEventListener('click', () => boxieAsk(p));
+    wrap.appendChild(b);
+  });
+}
+$('#bSend').addEventListener('click', () => {
+  const v = $('#bInput').value.trim();
+  if (v) { boxieAsk(v); $('#bInput').value = ''; }
+});
+$('#bInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const v = e.target.value.trim();
+    if (v) { boxieAsk(v); e.target.value = ''; }
+  }
+});
+
+/* ==================================================== [10] DEMO SEQUENCE */
+/* Drives the real interface — no video, no modal. Everything you see below
+   calls the same functions a presenter would trigger by hand.              */
+const caption = $('#caption');
+const DEMO_HOME = { 'f-handle': { x: 150, y: 480 } };
+
+function say(step, line, sub) {
+  caption.innerHTML = '<div class="step">' + step + '</div><div class="line">' + line + '</div>' +
+                      (sub ? '<div class="sub">' + sub + '</div>' : '');
+  caption.classList.add('show');
+}
+function sayHide() { caption.classList.remove('show'); }
+function progress(p) { $('#demoRail i').style.width = (p * 100) + '%'; }
+
+function setDetected(on) {
+  state.phys.forEach(p => p._el.classList.toggle('undetected', !on));
+}
+function countUp(p, to, ms) {
+  const node = $('.conf', p._lab);
+  if (!node) return Promise.resolve();
+  return tween(ms, t => { node.textContent = Math.round(lerp(40, to, t)) + '%'; });
+}
+async function slideTo(o, x, y, ms) {
+  const fx = o.x, fy = o.y;
+  await tween(ms, t => {
+    o.x = lerp(fx, x, t); o.y = lerp(fy, y, t);
+    o._el.style.left = o.x + 'px'; o._el.style.top = o.y + 'px';
+    drawWires(); positionCtx();
+  });
+}
+
+function resetScene() {
+  state.objects.forEach(o => { if (o._el) o._el.style.opacity = ''; });
+  setDetected(true);
+  const handle = byId('f-handle');
+  if (handle) { Object.assign(handle, DEMO_HOME['f-handle']); }
+  const mouse = physById('p-mouse');
+  if (mouse) { mouse.link = null; mouse.note = 'Unlinked object'; paintPhysLabel(mouse); }
+  const hinge = byId('f-hinge');
+  if (hinge) hinge.thread = SEED_THREADS['f-hinge'].map(c => Object.assign({}, c));
+  state.sel.clear();
+  boxieOpen(false);
+  bLog.innerHTML = '';
+  setTool(null);
+  V.explode = 0; V.section = false; V.wire = false; V.strokes = [];
+  if (V.ok) applyWire();
+  redrawStrokes();
+  openInViewer('f-hinge');
+  renderObjects();
+  drawWires();
+}
+
+function demoBtnState(mode) {
+  const b = $('#demoBtn');
+  const label = mode === 'running' ? 'STOP DEMO' : mode === 'done' ? 'RESTART DEMO' : 'RUN DEMO';
+  const icon  = mode === 'running' ? ICON.stop : mode === 'done' ? ICON.restart : ICON.play;
+  b.innerHTML = svgIcon(icon) + '<span class="lbl">' + label + '</span>';
+}
+
+function stopDemo(manual) {
+  state.demo.running = false;
+  state.demo.token++;
+  $('#demoRail').classList.remove('on');
+  sayHide();
+  V.autoSpin = 0;
+  demoBtnState('done');
+  if (manual) {
+    state.objects.forEach(o => { if (o._el) o._el.style.opacity = ''; });
+    setDetected(true);
+    state.phys.forEach(p => p._el.classList.remove('candidate', 'occupied'));
+    toast('Demo stopped');
+  }
+}
+
+async function runDemo() {
+  const token = ++state.demo.token;
+  const live = () => state.demo.token === token && state.demo.running;
+  state.demo.running = true;
+  demoBtnState('running');
+  $('#demoRail').classList.add('on');
+  progress(0);
+
+  resetScene();
+  await resetView(true);
+  if (!live()) return;
+
+  /* 1 — surface scan ---------------------------------------------------- */
+  setDetected(false);
+  state.objects.forEach(o => { if (o._el) o._el.style.opacity = '0'; });
+  say('01 · SURFACE MAPPING', 'Boxic Surface turns any table into a shared project workspace.',
+      'Physical references, CAD files, comments, and decisions all become part of the same living project record.');
+  const scan = $('#scan');
+  scan.classList.remove('run'); void scan.offsetWidth; scan.classList.add('run');
+  await wait(2700); if (!live()) return;
+  progress(.12);
+
+  /* 2 — detection ------------------------------------------------------- */
+  say('02 · OBJECT DETECTION', 'Four physical objects recognised on the surface.',
+      'Labels are projected beside each object — never on top of it.');
+  for (const p of state.phys) {
+    p._el.classList.remove('undetected');
+    countUp(p, p.conf, 500);
+    await wait(340); if (!live()) return;
+  }
+  await wait(700); if (!live()) return;
+  progress(.28);
+
+  /* 3 — project objects land on the table ------------------------------- */
+  say('03 · PROJECT OBJECTS', 'Six live files from the Portable Espresso Maker.',
+      'Versions, status, owners and comment counts, projected onto the table.');
+  const files = state.objects.filter(o => o.type === 'file');
+  for (const o of files) {
+    o._el.style.transition = 'opacity .5s ease, transform .5s ease';
+    o._el.style.opacity = '1';
+    await wait(150); if (!live()) return;
+  }
+  await wait(650); if (!live()) return;
+  progress(.42);
+
+  /* 4/5 — drag a file toward a physical object --------------------------- */
+  say('04 · PHYSICAL REFERENCE', 'Handle Assembly v07 is moved beside the mouse.',
+      'The mouse is being used as an ergonomic reference for the grip.');
+  const handle = byId('f-handle'), mouse = physById('p-mouse');
+  selectOnly(handle.id);
+  const spot = freeSpotBeside(mouse, 176, 200) || { x: mouse.x - 250, y: mouse.y - 100 };
+  await slideTo(handle, spot.x, spot.y, 1500); if (!live()) return;
+  mouse._el.classList.add('candidate');
+  await wait(1200); if (!live()) return;
+  progress(.56);
+
+  /* 6 — the link is made ------------------------------------------------- */
+  mouse._el.classList.remove('candidate');
+  linkObjects(mouse, handle);
+  say('05 · LINKED', 'The mouse is now part of the project record.',
+      'MOUSE · Detected · Linked → Handle Assembly v07 · Used as ergonomic reference');
+  await wait(2400); if (!live()) return;
+  progress(.68);
+
+  /* 7/8 — shared selection drives the 3D review window ------------------- */
+  say('06 · SHARED 3D REVIEW', 'Selecting a file on the table opens it for the whole room.',
+      'Hinge Housing v12 · In Review · 3 comments');
+  const hinge = byId('f-hinge');
+  selectOnly(hinge.id);
+  openInViewer(hinge.id);
+  V.autoSpin = 0.006;
+  await wait(2600); if (!live()) return;
+  V.autoSpin = 0;
+  progress(.8);
+
+  /* 9 — spatial comment posts into the activity feed --------------------- */
+  say('07 · SPATIAL COMMENT', 'Comments are pinned to the geometry itself.',
+      'Every pin becomes part of the project history, not a lost message.');
+  const c = { n: hinge.thread.length + 1, p: [.55, .42, .5], who: 'MT', at: 'now',
+              text: 'Wall thickness holds at 2.5 mm — clearing this for Prototype 4.' };
+  hinge.thread.push(c);
+  V.pins = hinge.thread.slice();
+  renderPins(); renderThread(); renderObjects();
+  logActivity('MT', 'commented on Hinge Housing v12');
+  await wait(2800); if (!live()) return;
+  progress(.9);
+
+  /* 10 — Boxie summarises the decision ----------------------------------- */
+  say('08 · PROJECT MEMORY', 'The project remembers what is on the table, how it is connected, and what the team needs to do next.',
+      'Boxie · asked: “Why was Hinge Housing v12 changed?”');
+  boxieOpen(true);
+  await boxieAsk(PROMPTS[0]); if (!live()) return;
+  await wait(2600); if (!live()) return;
+  progress(1);
+
+  say('BOXIC SURFACE', 'The physical project table for hardware teams.',
+      'Founders Inc · Night Hack');
+  await wait(2600); if (!live()) return;
+  sayHide();
+  await wait(500);
+  stopDemo(false);
+}
+
+/* ============================================================== [11] BOOT */
+async function boot() {
+  buildToolbar();
+  buildViewerTools();
+  buildPrompts();
+  renderPhys();
+  renderObjects();
+  initViewer();
+  openInViewer('f-hinge');
+  setViewerMode('orbit');
+  resetView(false);
+  demoBtnState('idle');
+
+  /* pre-linked object in the default scene: phone -> Electronics Enclosure */
+  state.phys.forEach(p => paintPhysLabel(p));
+  drawWires();
+
+  logActivity('KC', 'linked Electronics Enclosure v18 to Phone', '1h ago');
+  logActivity('MT', 'commented on Hinge Housing v12', '32m ago');
+  logActivity('AL', 'approved Motor Mount v05', '18m ago');
+
+  const st = $('#bootSt');
+  const lines = ['Calibrating projector…', 'Mapping surface geometry…', 'Detecting objects…', 'Loading project · Portable Espresso Maker'];
+  for (let i = 0; i < lines.length; i++) { st.textContent = lines[i]; await wait(520); }
+  $('#bootMsg').classList.add('show');
+  await wait(1900);
+  $('#boot').classList.add('done');
+  document.body.classList.add('awake');
+  setTimeout(() => $('#boot').remove(), 900);
+
+  setDetected(false);
+  const scan = $('#scan');
+  scan.classList.add('run');
+  await wait(900);
+  for (const p of state.phys) { p._el.classList.remove('undetected'); countUp(p, p.conf, 420); await wait(230); }
+  startPresence();
+  await wait(600);
+  toast('Surface mapped · 4 objects detected');
+  await wait(2400);
+  toast('Drag the real objects to match your table');
+}
+
+window.addEventListener('resize', () => { sizeViewer(); positionCtx(); });
+if (window.ResizeObserver) new ResizeObserver(sizeViewer).observe(vStage);
+boot();
+
+</script>
+<nav id="views">
+  <a href="/hold">hold it</a>
+  <a href="/control">control</a>
+  <a href="/desk">desk</a>
+  <a href="/project">record</a>
+  <a href="/about">about</a>
+</nav>
+<script src="/static/tour.js"></script>
+</body>
+</html>
