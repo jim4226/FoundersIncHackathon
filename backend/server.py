@@ -7,22 +7,34 @@ decoupling is deliberate: the Prism integration, the web UI and the replay mode
 all consume the identical stream, so the two halves of the team can build in
 parallel and a dead headband degrades the demo instead of ending it.
 
-Run:  python -m backend.server            (simulated subject, default)
-      EEG_SOURCE=osc python -m backend.server
-      EEG_SOURCE=brainflow MUSE_BOARD_ID=39 python -m backend.server
+Run:  python -m backend.server                (loopback, simulated subject)
+      python -m backend.server --lan --https  (phone / other LAN devices)
+      EEG_SOURCE=osc python -m backend.server --lan --https
+      EEG_SOURCE=brainflow MUSE_BOARD_ID=39 python -m backend.server --lan --https
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
+import ipaddress
 import json
 import os
+import secrets
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -38,8 +50,246 @@ from .store import HIGH_EFFORT_THRESHOLD, LOW_EFFORT_THRESHOLD, ProjectStore
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 TICK_HZ = 8.0
+OPERATOR_COOKIE = "bench_operator"
+
+
+@dataclass(frozen=True)
+class AccessConfig:
+    """Process-local access policy.
+
+    Loopback mode intentionally keeps the zero-setup hackathon experience. LAN
+    mode is explicit and gets a new high-entropy operator token on every start.
+    The phone pairing token remains separate and can only open `/ws/phone`.
+    """
+
+    lan_mode: bool = False
+    secure: bool = False
+    port: int = 8000
+    bind_host: str = "127.0.0.1"
+    allowed_hosts: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"})
+    operator_token: str | None = field(default=None, repr=False)
+
+
+ACCESS = AccessConfig()
+
+
+def _authority(value: str | None) -> tuple[str | None, int | None]:
+    """Return a normalized (host, port) from a Host header-like value."""
+    if not value:
+        return None, None
+    try:
+        parsed = urlsplit(f"//{value}")
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return None, None
+    return (host.rstrip(".").lower() if host else None), port
+
+
+def _configure_access(
+    *,
+    lan_mode: bool,
+    secure: bool,
+    port: int,
+    advertised_host: str | None = None,
+    operator_token: str | None = None,
+) -> AccessConfig:
+    """Install the access policy before uvicorn starts (also unit-testable)."""
+    global ACCESS
+
+    hosts = {"127.0.0.1", "localhost", "::1"}
+    advertised, _ = _authority(advertised_host)
+    if advertised:
+        hosts.add(advertised)
+
+    token = (operator_token or secrets.token_urlsafe(32)) if lan_mode else None
+    ACCESS = AccessConfig(
+        lan_mode=lan_mode,
+        secure=secure,
+        port=port,
+        bind_host="0.0.0.0" if lan_mode else "127.0.0.1",
+        allowed_hosts=frozenset(hosts),
+        operator_token=token,
+    )
+    return ACCESS
+
+
+def _host_allowed(host_header: str | None) -> bool:
+    host, port = _authority(host_header)
+    if host not in ACCESS.allowed_hosts:
+        return False
+    expected_default = 443 if ACCESS.secure else 80
+    return port == ACCESS.port if port is not None else ACCESS.port == expected_default
+
+
+def _origin_allowed(origin: str | None, host_header: str | None = None) -> bool:
+    """Reject browser requests and sockets arriving from another web origin.
+
+    Non-browser clients may omit Origin, but still need the operator/phone token
+    and a valid Host header.
+    """
+    if not origin:
+        return True
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return False
+    expected_scheme = "https" if ACCESS.secure else "http"
+    host = parsed.hostname.rstrip(".").lower() if parsed.hostname else None
+    allowed = (
+        parsed.scheme == expected_scheme
+        and host in ACCESS.allowed_hosts
+        and port == ACCESS.port
+    )
+    if not allowed or not host_header:
+        return allowed
+    request_host, request_port = _authority(host_header)
+    if request_port is None:
+        request_port = 443 if ACCESS.secure else 80
+    return host == request_host and port == request_port
+
+
+def _peer_is_loopback(client_host: str | None) -> bool:
+    """Use the socket peer, not a spoofable header, for the local trust boundary."""
+    if not client_host:
+        return False
+    try:
+        return ipaddress.ip_address(client_host.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+def _client_allowed(client_host: str | None) -> bool:
+    """Default-deny external peers unless explicit authenticated LAN mode is active."""
+    return ACCESS.lan_mode or _peer_is_loopback(client_host)
+
+
+def _operator_token_matches(
+    cookie_token: str | None,
+    authorization: str | None,
+) -> bool:
+    if not ACCESS.lan_mode:
+        return True
+    supplied = cookie_token
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and value:
+            supplied = value
+    return bool(
+        supplied
+        and ACCESS.operator_token
+        and secrets.compare_digest(supplied, ACCESS.operator_token)
+    )
+
+
+def _operator_access_allowed(
+    *,
+    client_host: str | None,
+    host: str | None,
+    origin: str | None,
+    cookie_token: str | None,
+    authorization: str | None,
+) -> bool:
+    return (
+        _client_allowed(client_host)
+        and _host_allowed(host)
+        and _origin_allowed(origin, host)
+        and _operator_token_matches(cookie_token, authorization)
+    )
+
+
+def _phone_transport_allowed(
+    *, client_host: str | None, host: str | None, origin: str | None
+) -> bool:
+    return (
+        _client_allowed(client_host)
+        and _host_allowed(host)
+        and _origin_allowed(origin, host)
+    )
+
+
+def _phone_access_allowed(
+    *,
+    client_host: str | None,
+    host: str | None,
+    origin: str | None,
+    phone_token: str | None,
+) -> bool:
+    return _phone_transport_allowed(
+        client_host=client_host, host=host, origin=origin
+    ) and pairing.check(phone_token)
+
+
+def _internal_access_allowed(
+    *, client_host: str | None, host: str | None, origin: str | None
+) -> bool:
+    """Authorize the read-only helper feed by an actual loopback socket peer."""
+    return (
+        _peer_is_loopback(client_host)
+        and _host_allowed(host)
+        and origin is None
+    )
+
+
+def _safe_next(value: str | None) -> str:
+    """Keep the post-login redirect same-origin and path-only."""
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or "\\" in value or "\r" in value or "\n" in value:
+        return "/"
+    return value
 
 app = FastAPI(title="Bench")
+
+_PROTECTED_PAGES = {
+    "/",
+    "/index.html",
+    "/control",
+    "/desk",
+    "/project",
+    "/surface",
+    "/hold",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+}
+
+
+@app.middleware("http")
+async def _enforce_access(request: Request, call_next):
+    """Apply Host/Origin checks and operator auth before state can be read."""
+    if not _client_allowed(request.client.host if request.client else None):
+        return JSONResponse({"error": "external access is disabled"}, status_code=403)
+    if not _host_allowed(request.headers.get("host")):
+        return JSONResponse({"error": "untrusted Host header"}, status_code=400)
+    if not _origin_allowed(
+        request.headers.get("origin"), request.headers.get("host")
+    ):
+        return JSONResponse({"error": "cross-origin request denied"}, status_code=403)
+
+    if ACCESS.lan_mode:
+        authorized = _operator_token_matches(
+            request.cookies.get(OPERATOR_COOKIE),
+            request.headers.get("authorization"),
+        )
+        if request.url.path.startswith("/api/") and not authorized:
+            return JSONResponse(
+                {"error": "operator authentication required"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if request.url.path in _PROTECTED_PAGES and not authorized:
+            destination = quote(_safe_next(request.url.path), safe="/")
+            return RedirectResponse(
+                f"/auth/operator?next={destination}", status_code=303
+            )
+
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
 
 store = ProjectStore()
 estimator = EffortEstimator()
@@ -48,19 +298,68 @@ agent = ProjectAgent(store)
 source = build_source(os.environ.get("EEG_SOURCE", "sim"), estimator, attention)
 
 _clients: set[WebSocket] = set()
+_internal_clients: set[WebSocket] = set()
 _state: dict = {"effort": None, "attention": None, "lastFlag": None}
 _last_desk_ts: float = 0.0
 
 
-async def _broadcast(payload: dict) -> None:
-    if not _clients:
-        return
-    message = json.dumps(payload)
-    for ws in list(_clients):
+def _variant_summary(value: dict | None) -> dict | None:
+    if not value:
+        return None
+    return {key: value.get(key) for key in ("id", "label")}
+
+
+def _internal_payload(payload: dict) -> dict | None:
+    """Reduce the operator stream to the overlay fields local helpers need."""
+    kind = payload.get("type")
+    if kind == "tick":
+        return {
+            "type": "tick",
+            "effort": payload.get("effort"),
+            "attention": payload.get("attention"),
+            "variants": [
+                _variant_summary(item) for item in payload.get("variants", [])
+            ],
+        }
+    if kind == "focus_changed":
+        return {
+            "type": kind,
+            "zone": payload.get("zone"),
+            "variant": _variant_summary(payload.get("variant")),
+        }
+    if kind == "vote":
+        return {
+            "type": kind,
+            "vote": payload.get("vote"),
+            "variant": _variant_summary(payload.get("variant")),
+            "binding": payload.get("binding"),
+            "decisive": payload.get("decisive"),
+            "promoted": _variant_summary(payload.get("promoted")),
+            "reverted": _variant_summary(payload.get("reverted")),
+        }
+    if kind == "vote_unresolved":
+        return {
+            "type": kind,
+            "vote": payload.get("vote"),
+            "reason": payload.get("reason"),
+        }
+    return None
+
+
+async def _send_to(clients: set[WebSocket], message: str) -> None:
+    for ws in list(clients):
         try:
             await ws.send_text(message)
         except Exception:  # noqa: BLE001 - a dead client must not stall the loop
-            _clients.discard(ws)
+            clients.discard(ws)
+
+
+async def _broadcast(payload: dict) -> None:
+    if _clients:
+        await _send_to(_clients, json.dumps(payload))
+    internal = _internal_payload(payload)
+    if internal and _internal_clients:
+        await _send_to(_internal_clients, json.dumps(internal))
 
 
 async def _tick_loop() -> None:
@@ -250,6 +549,84 @@ desk = DeskBridge(_on_desk_frame)
 phone = PhoneCamera(_ingest_desk_frame)
 
 
+@app.get("/auth/operator", response_class=HTMLResponse)
+def operator_login_form(next: str = "/") -> HTMLResponse:
+    """Render a tiny local login form without putting the token in a URL."""
+    destination = _safe_next(next)
+    if not ACCESS.lan_mode:
+        return RedirectResponse(destination, status_code=303)
+
+    escaped_next = html.escape(destination, quote=True)
+    response = HTMLResponse(
+        f"""<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Bench operator access</title>
+<style>
+body{{font:16px/1.5 system-ui,sans-serif;background:#08090c;color:#e8ecf4;display:grid;
+place-items:center;min-height:100vh;margin:0}}main{{width:min(34rem,calc(100% - 2rem));padding:2rem;
+background:#101319;border:1px solid #293040;border-radius:14px}}label,input,button{{display:block;
+width:100%;box-sizing:border-box}}input,button{{font:inherit;padding:.8rem;margin-top:.5rem;border-radius:8px}}
+input{{background:#08090c;color:#fff;border:1px solid #465069}}button{{margin-top:1rem;background:#45e0c0;
+border:0;color:#08110f;font-weight:700;cursor:pointer}}p{{color:#aab3c3}}code{{color:#fff}}</style>
+<main><h1>Bench operator access</h1><p>LAN mode protects project state and controls.
+Paste the per-session operator token printed by <code>backend.server</code>.</p>
+<form method="post" action="/auth/operator">
+<input type="hidden" name="next" value="{escaped_next}">
+<label>Operator token<input name="token" type="password" autocomplete="one-time-code"
+spellcheck="false" autofocus required></label><button type="submit">Unlock this browser</button>
+</form></main></html>"""
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/auth/operator")
+async def operator_login(request: Request) -> Response:
+    """Exchange the console token for a process-scoped, HttpOnly cookie."""
+    try:
+        length = int(request.headers.get("content-length", "0") or 0)
+    except ValueError:
+        return HTMLResponse("Invalid Content-Length.", status_code=400)
+    if length > 4096:
+        return HTMLResponse("Login request too large.", status_code=413)
+    raw = await request.body()
+    if len(raw) > 4096:  # also cap chunked requests without Content-Length
+        return HTMLResponse("Login request too large.", status_code=413)
+    try:
+        form = parse_qs(raw.decode("utf-8"), max_num_fields=4)
+    except (UnicodeDecodeError, ValueError):
+        return HTMLResponse("Invalid login request.", status_code=400)
+
+    destination = _safe_next((form.get("next") or ["/"])[0])
+    if not ACCESS.lan_mode:
+        return RedirectResponse(destination, status_code=303)
+
+    supplied = (form.get("token") or [None])[0]
+    if not (
+        supplied
+        and ACCESS.operator_token
+        and secrets.compare_digest(supplied, ACCESS.operator_token)
+    ):
+        return HTMLResponse(
+            "Operator token rejected. Return to the terminal for the current token.",
+            status_code=403,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    response = RedirectResponse(destination, status_code=303)
+    response.set_cookie(
+        OPERATOR_COOKIE,
+        ACCESS.operator_token,
+        max_age=12 * 60 * 60,
+        httponly=True,
+        secure=ACCESS.secure,
+        samesite="strict",
+        path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     source.start()
@@ -272,6 +649,15 @@ async def _shutdown() -> None:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    if not _operator_access_allowed(
+        client_host=ws.client.host if ws.client else None,
+        host=ws.headers.get("host"),
+        origin=ws.headers.get("origin"),
+        cookie_token=ws.cookies.get(OPERATOR_COOKIE),
+        authorization=ws.headers.get("authorization"),
+    ):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     _clients.add(ws)
     try:
@@ -284,18 +670,55 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         _clients.discard(ws)
 
 
+@app.websocket("/ws/internal/status")
+async def internal_status_socket(ws: WebSocket) -> None:
+    """Read-only, reduced feedback for helper processes on this machine only."""
+    if not _internal_access_allowed(
+        client_host=ws.client.host if ws.client else None,
+        host=ws.headers.get("host"),
+        origin=ws.headers.get("origin"),
+    ):
+        await ws.close(code=1008)
+        return
+    await ws.accept()
+    _internal_clients.add(ws)
+    try:
+        snapshot = _internal_payload({
+            "type": "tick",
+            "effort": _state["effort"],
+            "attention": _state["attention"],
+            "variants": [variant.to_dict() for variant in store.variants],
+        })
+        await ws.send_text(json.dumps(snapshot))
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _internal_clients.discard(ws)
+
+
 @app.websocket("/ws/phone")
 async def phone_socket(ws: WebSocket) -> None:
     """A paired phone, streaming JPEG frames of the desk.
 
-    The token is the one the QR code carried. It is not a security boundary --
-    anyone on the LAN who can read the presenter's screen has it -- but it does
-    stop a phone still holding a code from a previous run from quietly taking
-    over the desk feed mid-demo.
+    The QR carries a separate, least-privilege token. It can submit camera
+    frames here and nowhere else; it cannot read project state or use operator
+    controls. It also expires naturally whenever the process restarts.
     """
+    if not _phone_transport_allowed(
+        client_host=ws.client.host if ws.client else None,
+        host=ws.headers.get("host"),
+        origin=ws.headers.get("origin"),
+    ):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     if not pairing.check(ws.query_params.get("k")):
-        await ws.send_text(json.dumps({"type": "rejected", "reason": "bad pairing token"}))
+        await ws.send_text(json.dumps({
+            "type": "rejected",
+            "reason": "invalid or stale phone pairing token",
+        }))
         await ws.close(code=1008)
         return
 
@@ -333,7 +756,15 @@ def _pair_info(request: Request) -> dict:
     connection the browser is already using -- not a flag we hope matches.
     """
     port = request.url.port or (443 if request.url.scheme == "https" else 80)
-    return pairing.info(secure=request.url.scheme == "https", port=port)
+    info = pairing.info(secure=request.url.scheme == "https", port=port)
+    info["lanMode"] = ACCESS.lan_mode
+    info["cameraAllowed"] = bool(ACCESS.lan_mode and info["cameraAllowed"])
+    if not ACCESS.lan_mode:
+        # Do not advertise a LAN URL that the loopback-only server cannot serve,
+        # and do not expose even the least-privilege phone token unnecessarily.
+        info["url"] = None
+        info["token"] = None
+    return info
 
 
 @app.get("/api/pair")
@@ -344,6 +775,12 @@ def get_pair(request: Request) -> dict:
 
 @app.get("/api/pair/qr.svg")
 def get_pair_qr(request: Request) -> Response:
+    if not ACCESS.lan_mode:
+        return Response(
+            content="LAN pairing is disabled; restart with --lan --https.",
+            media_type="text/plain",
+            status_code=409,
+        )
     svg = pairing.qr_svg(_pair_info(request)["url"])
     return Response(content=svg, media_type="image/svg+xml",
                     headers={"Cache-Control": "no-store"})
@@ -524,28 +961,54 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Bench")
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
+    parser.add_argument(
+        "--lan",
+        action="store_true",
+        help="explicitly expose Bench on the LAN; requires --https and protects "
+             "all project state and controls with a per-session operator token",
+    )
     parser.add_argument("--https", action="store_true",
                         default=os.environ.get("BENCH_HTTPS", "") not in ("", "0", "false"),
                         help="serve TLS with a self-signed cert, so a paired "
                              "phone is allowed to open its camera")
     args = parser.parse_args()
 
+    if args.lan and not args.https:
+        parser.error(
+            "--lan requires --https so operator and phone tokens are not sent in cleartext"
+        )
+
+    advertised_host = pairing.lan_ip() if args.lan else None
+    access = _configure_access(
+        lan_mode=args.lan,
+        secure=args.https,
+        port=args.port,
+        advertised_host=advertised_host,
+    )
+
     ssl: dict = {}
     if args.https:
         from .tls import ensure_cert
 
-        certfile, keyfile = ensure_cert(pairing.lan_ip())
+        certfile, keyfile = ensure_cert(advertised_host or "127.0.0.1")
         ssl = {"ssl_certfile": certfile, "ssl_keyfile": keyfile}
 
     scheme = "https" if args.https else "http"
-    print(f"[bench] control  {scheme}://localhost:{args.port}")
-    print(f"[bench] desk     {scheme}://localhost:{args.port}/desk")
-    print(f"[bench] phone    {pairing.pair_url(args.https, args.port)}")
-    if not args.https:
-        print("[bench] note: phone camera needs --https (browsers refuse "
-              "getUserMedia on a plain-http LAN address)")
+    local_base = f"{scheme}://localhost:{args.port}"
+    print(f"[bench] control  {local_base}")
+    print(f"[bench] desk     {local_base}/desk")
+    if access.lan_mode:
+        lan_base = f"{scheme}://{advertised_host}:{args.port}"
+        print("[bench] !!! LAN MODE: project state and controls require operator auth !!!")
+        print(f"[bench] operator login  {lan_base}/auth/operator")
+        print(f"[bench] operator token  {access.operator_token}")
+        print(f"[bench] phone           {pairing.pair_url(args.https, args.port)}")
+        print("[bench] use a trusted/private network; tokens expire when this process exits")
+    else:
+        print("[bench] loopback-only; phone pairing is disabled")
+        print("[bench] use --lan --https to pair a phone or open Bench from another device")
 
-    uvicorn.run(app, host="0.0.0.0", port=args.port, **ssl)
+    uvicorn.run(app, host=access.bind_host, port=args.port, **ssl)
 
 
 if __name__ == "__main__":

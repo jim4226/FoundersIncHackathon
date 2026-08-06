@@ -178,13 +178,13 @@ class Hands:
         self.available = False
         self.reason = ""
         self._landmarker = None
-        try:
-            import mediapipe as mp
-        except ImportError:
-            self.reason = "mediapipe not installed"
-            return
         if not os.path.exists(model_path):
             self.reason = f"model missing: {os.path.basename(model_path)}"
+            return
+        try:
+            import mediapipe as mp
+        except Exception as exc:  # optional dependency must never stop the bench
+            self.reason = f"mediapipe unavailable: {type(exc).__name__}: {exc}"
             return
         try:
             base = mp.tasks.BaseOptions(model_asset_path=model_path)
