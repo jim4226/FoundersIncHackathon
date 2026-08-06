@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backend import vision  # noqa: E402 - path has to be set before this import
 
 WS_PORT = 8766
+WS_HOST = "127.0.0.1"   # camera frames never leave the laptop
 CAM_INDEX = 1          # the DESK camera; gesture_server.py uses 0
 FRAME_W, FRAME_H = vision.FRAME_W, vision.FRAME_H
 JPEG_QUALITY = vision.JPEG_QUALITY
@@ -77,7 +78,13 @@ def broadcast(message: dict) -> None:
 
 
 def start_ws() -> None:
-    with serve(ws_handler, "0.0.0.0", WS_PORT, max_size=8 * 1024 * 1024) as server:
+    with serve(
+        ws_handler,
+        WS_HOST,
+        WS_PORT,
+        max_size=8 * 1024 * 1024,
+        origins=[None],  # non-browser local bridge only; blocks hostile webpages
+    ) as server:
         print(f"[ws] desk broadcasting on ws://localhost:{WS_PORT}")
         server.serve_forever()
 

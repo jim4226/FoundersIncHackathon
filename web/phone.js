@@ -142,7 +142,7 @@ function connect() {
       nodes.count.textContent = 'not paired';
       nodes.hint.innerHTML = '<b>No bench is answering on this network.</b> This page is '
         + 'what the QR code opens — the camera is live, but the frames have nowhere to go. '
-        + 'Run <code>python -m backend.server --https</code> on your laptop and scan the '
+        + 'Run <code>python -m backend.server --lan --https</code> on your laptop and scan the '
         + 'code on its control view.';
     }
     setTimeout(connect, 1200);

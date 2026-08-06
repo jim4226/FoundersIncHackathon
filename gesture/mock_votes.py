@@ -24,6 +24,7 @@ import time
 from websockets.sync.server import serve
 
 WS_PORT = 8765
+WS_HOST = "127.0.0.1"   # votes are consumed by the bench on this laptop
 
 clients, clients_lock = set(), threading.Lock()
 
@@ -76,7 +77,12 @@ def main() -> None:
                         help="emit alternating votes on a timer instead of reading keys")
     args = parser.parse_args()
 
-    server = serve(ws_handler, "0.0.0.0", WS_PORT)
+    server = serve(
+        ws_handler,
+        WS_HOST,
+        WS_PORT,
+        origins=[None],  # non-browser local bridge only; blocks hostile webpages
+    )
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"[ws] broadcasting on ws://localhost:{WS_PORT}")
 

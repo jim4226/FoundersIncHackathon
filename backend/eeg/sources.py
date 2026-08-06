@@ -19,6 +19,7 @@ downstream knows which one is running.
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 import random
@@ -201,10 +202,11 @@ class SimulatedSource(EEGSource):
 class OSCSource(EEGSource):
     """Mind Monitor (iOS/Android) streaming OSC over UDP.
 
-    Point the app's OSC target at this machine on MUSE_OSC_PORT. Note that most
-    venue WiFi enables AP client isolation, which silently drops phone-to-laptop
-    UDP with no error anywhere -- if packets never arrive, put the laptop on the
-    phone's hotspot. Bind 0.0.0.0, never 127.0.0.1.
+    Point the app's OSC target at this machine on MUSE_OSC_PORT and set
+    MUSE_OSC_HOST to the phone's exact IPv4 address. Without that explicit
+    sender pairing, the listener remains loopback-only. Venue WiFi often enables
+    AP client isolation, which silently drops phone-to-laptop UDP with no error
+    anywhere -- if packets never arrive, put the laptop on the phone's hotspot.
 
     The app's own blink and jaw-clench detectors are better tuned than anything
     we would write before the deadline, so we defer to them when they fire.
@@ -212,53 +214,114 @@ class OSCSource(EEGSource):
 
     name = "osc"
 
-    def __init__(self, estimator, attention=None, port: int | None = None):
+    def __init__(
+        self,
+        estimator,
+        attention=None,
+        port: int | None = None,
+        allowed_host: str | None = None,
+    ):
         super().__init__(estimator, attention)
         self.port = port or int(os.environ.get("MUSE_OSC_PORT", "5000"))
+        configured_host = allowed_host or os.environ.get("MUSE_OSC_HOST")
+        if configured_host:
+            try:
+                address = ipaddress.ip_address(configured_host)
+            except ValueError as exc:
+                raise ValueError(
+                    "MUSE_OSC_HOST must be the Mind Monitor phone's exact IPv4 address"
+                ) from exc
+            if address.version != 4 or address.is_unspecified or address.is_multicast:
+                raise ValueError(
+                    "MUSE_OSC_HOST must be a unicast IPv4 address"
+                )
+            self.allowed_host = str(address)
+            self.bind_host = "127.0.0.1" if address.is_loopback else "0.0.0.0"
+        else:
+            self.allowed_host = "127.0.0.1"
+            self.bind_host = "127.0.0.1"
         self.last_packet = 0.0
+        self.rejected_packets = 0
         self.horseshoe: list[float] = [4.0, 4.0, 4.0, 4.0]
+
+    def _sender_allowed(self, client_address: tuple[str, int] | None) -> bool:
+        if not client_address:
+            return False
+        try:
+            sender = str(ipaddress.ip_address(client_address[0]))
+        except ValueError:
+            return False
+        return sender == self.allowed_host
+
+    def _trusted(self, handler):
+        """Wrap a python-osc callback with an exact datagram-source check."""
+        def guarded(client_address, osc_address, *values):
+            if not self._sender_allowed(client_address):
+                self.rejected_packets += 1
+                return None
+            return handler(osc_address, *values)
+
+        return guarded
+
+    def _on_eeg(self, _addr, *values):
+        self.last_packet = time.time()
+        self.status = "streaming"
+        if len(values) >= 4:
+            self._emit([float(v) for v in values[:4]])
+
+    def _on_blink(self, _addr, *values):
+        if values and float(values[0]) > 0:
+            self.estimator.note_external_blink()
+
+    def _on_clench(self, _addr, *values):
+        if values and float(values[0]) > 0:
+            self.estimator.note_external_clench()
+
+    def _on_horseshoe(self, _addr, *values):
+        if len(values) >= 4:                      # 1 good, 2 ok, >=3 bad
+            self.horseshoe = [float(v) for v in values[:4]]
+            self.estimator.set_contact(self.horseshoe)
+
+    def _on_acc(self, _addr, *values):
+        if len(values) >= 3:
+            self.estimator.push_motion(accel=tuple(float(v) for v in values[:3]))
+
+    def _on_gyro(self, _addr, *values):
+        if len(values) >= 3:
+            self.estimator.push_motion(gyro=tuple(float(v) for v in values[:3]))
 
     def _run(self) -> None:
         from pythonosc.dispatcher import Dispatcher
         from pythonosc.osc_server import BlockingOSCUDPServer
 
-        def on_eeg(_addr, *values):
-            self.last_packet = time.time()
-            self.status = "streaming"
-            if len(values) >= 4:
-                self._emit([float(v) for v in values[:4]])
-
-        def on_blink(_addr, *values):
-            if values and float(values[0]) > 0:
-                self.estimator.note_external_blink()
-
-        def on_clench(_addr, *values):
-            if values and float(values[0]) > 0:
-                self.estimator.note_external_clench()
-
-        def on_horseshoe(_addr, *values):
-            if len(values) >= 4:                      # 1 good, 2 ok, >=3 bad
-                self.horseshoe = [float(v) for v in values[:4]]
-                self.estimator.set_contact(self.horseshoe)
-
-        def on_acc(_addr, *values):
-            if len(values) >= 3:
-                self.estimator.push_motion(accel=tuple(float(v) for v in values[:3]))
-
-        def on_gyro(_addr, *values):
-            if len(values) >= 3:
-                self.estimator.push_motion(gyro=tuple(float(v) for v in values[:3]))
-
         dispatcher = Dispatcher()
-        dispatcher.map("/muse/eeg", on_eeg)
-        dispatcher.map("/muse/elements/blink", on_blink)
-        dispatcher.map("/muse/elements/jaw_clench", on_clench)
-        dispatcher.map("/muse/elements/horseshoe", on_horseshoe)
-        dispatcher.map("/muse/acc", on_acc)
-        dispatcher.map("/muse/gyro", on_gyro)
+        dispatcher.map(
+            "/muse/eeg", self._trusted(self._on_eeg), needs_reply_address=True
+        )
+        dispatcher.map(
+            "/muse/elements/blink",
+            self._trusted(self._on_blink),
+            needs_reply_address=True,
+        )
+        dispatcher.map(
+            "/muse/elements/jaw_clench",
+            self._trusted(self._on_clench),
+            needs_reply_address=True,
+        )
+        dispatcher.map(
+            "/muse/elements/horseshoe",
+            self._trusted(self._on_horseshoe),
+            needs_reply_address=True,
+        )
+        dispatcher.map(
+            "/muse/acc", self._trusted(self._on_acc), needs_reply_address=True
+        )
+        dispatcher.map(
+            "/muse/gyro", self._trusted(self._on_gyro), needs_reply_address=True
+        )
 
-        server = BlockingOSCUDPServer(("0.0.0.0", self.port), dispatcher)
-        self.status = "listening"
+        server = BlockingOSCUDPServer((self.bind_host, self.port), dispatcher)
+        self.status = f"listening for {self.allowed_host}"
         while not self._stop.is_set():
             server.handle_request()
         server.server_close()

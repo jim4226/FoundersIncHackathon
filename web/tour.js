@@ -78,7 +78,7 @@
           + 'the position after the ocular signal has decayed.' },
     { page: '/control', at: '.stage', title: 'Drive it yourself',
       body: 'Arrow keys beat sliders under stage lights: ← → move the gaze, ↑ ↓ move the effort, '
-          + 'b double-blinks to flag, c clenches to confirm. Push effort down and watch the agent '
+          + 'b double-blinks to flag, c records a jaw-clench flag. Push effort down and watch the agent '
           + 'change its mind about what you asked it.' },
     { page: '/control', at: '#pairing', title: 'Your phone is the desk camera',
       body: 'Scan the code and the phone streams frames the bench runs the same detector over — '

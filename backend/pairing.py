@@ -26,7 +26,10 @@ import os
 import secrets
 import socket
 
-TOKEN = os.environ.get("BENCH_PAIR_TOKEN") or secrets.token_urlsafe(6)
+# Separate from the operator token: this grants only camera-frame submission to
+# `/ws/phone`. Twenty-four random bytes keep the default safe even on a noisy,
+# shared venue network; the value changes whenever the process restarts.
+TOKEN = os.environ.get("BENCH_PAIR_TOKEN") or secrets.token_urlsafe(24)
 
 
 def lan_ip() -> str:

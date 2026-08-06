@@ -249,11 +249,47 @@ curl -o desk/hand_landmarker.task \
 
 ```bash
 pip install -r requirements.txt
-python -m backend.server --https  # simulated subject, no hardware needed
-# control view  https://localhost:8000
-# desk view     https://localhost:8000/desk
-# phone camera  scan the QR on the control view
+python -m backend.server          # simulated subject, loopback-only
+# control view  http://localhost:8000
+# desk view     http://localhost:8000/desk
 ```
+
+Loopback is the secure default: only this computer can reach project state or
+controls. To pair a phone or open a view from another device, opt into LAN mode:
+
+```bash
+python -m backend.server --lan --https
+# The terminal prints a per-session operator token and login URL.
+# Log in on each operator/audience browser, then scan the phone QR.
+```
+
+`--lan` requires HTTPS so neither token crosses the network in cleartext. The
+operator token unlocks project reads and controls in that browser using an
+HttpOnly, same-site cookie. The QR contains a different, least-privilege token
+that can submit phone-camera frames only; it cannot read the project, call the
+agent, or promote a design. By default, both tokens expire when the process
+exits.
+
+### LAN security model
+
+Use LAN mode only on a trusted private network or a phone hotspot. The server
+rejects unrecognized Host and Origin headers, and every state-reading or
+state-changing REST route plus the main event WebSocket requires operator auth.
+Without `--lan`, it also verifies the actual socket peer is loopback; running
+the ASGI app through another command cannot accidentally turn a spoofed
+`Host: localhost` request into external access.
+The self-signed certificate encrypts traffic, but the browser warning is not a
+substitute for trusting the network or the other devices on it. Do not load a
+real private project on shared venue WiFi.
+
+The companion desk and gesture WebSockets bind to `127.0.0.1` as well, so raw
+camera frames and votes never become unauthenticated LAN services. They also
+reject browser `Origin` headers, preventing hostile webpages from tunneling
+through the browser to loopback. Run those helpers on the same laptop as the
+bench. The gesture overlay reads only a reduced, loopback-only
+`/ws/internal/status` feed; in HTTPS mode it verifies the
+certificate generated in `.bench-certs/`. Set `BENCH_WS_URL` or `BENCH_CA_FILE`
+only if you changed the bench port or certificate location.
 
 ### The desk camera is a phone
 
@@ -266,12 +302,13 @@ same overlay — `backend/phone.py` and `desk/desk_server.py` share one detector
 
 Two things about that path are worth knowing before you rely on it on stage:
 
-- **It needs HTTPS.** Browsers only hand out the camera in a secure context, and
-  `http://192.168.1.24:8000` is not one. `--https` generates a self-signed
-  certificate naming your current LAN IP (via `openssl`, into `.bench-certs/`).
-  The phone warns once about it, you tap through, and the camera works. Without
-  `--https` the phone page still loads and then tells you exactly why it can't
-  open the camera, rather than showing a black rectangle.
+- **It needs explicit LAN mode and HTTPS.** Browsers only hand out the camera in
+  a secure context, and `http://192.168.1.24:8000` is not one. `--lan --https`
+  generates a self-signed certificate naming your current LAN IP (via
+  `openssl`, into `.bench-certs/`) and enables the authenticated LAN listener.
+  The phone warns once about the certificate, you tap through, and the camera
+  works. Without `--lan`, the server stays on `127.0.0.1` and renders no usable
+  phone QR.
 - **Both cameras can be running.** While a phone is streaming it owns the desk
   feed; the webcam service takes back over ~2.5 s after the phone drops. So the
   phone is also the fallback for a webcam that won't open, and vice versa.
@@ -281,10 +318,12 @@ Calibration is the same idea as the webcam's `c` key: clear the desk and tap
 If nobody does, the phone self-calibrates a second or so after the picture
 stops moving, so an uncalibrated demo shows something rather than nothing.
 
-The pairing URL carries a token that changes every run — a phone still holding
-an old QR code cannot quietly take over the desk feed mid-demo. Set
-`BENCH_PAIR_TOKEN` to pin it, or `BENCH_HOST` to advertise a different address
-(a tunnel, say) instead of the detected LAN IP.
+The pairing URL carries a camera-only token that changes every run — a phone
+still holding an old QR code cannot quietly take over the desk feed mid-demo,
+and that token cannot open the operator API or event stream. Set
+`BENCH_PAIR_TOKEN` to pin the phone token, or `BENCH_HOST` to advertise a
+different address (a tunnel, say) instead of the detected LAN IP. The operator
+token remains separate and is always generated fresh at process start.
 
 The overhead webcam, if you'd rather use one, in its own terminal:
 
@@ -306,7 +345,8 @@ reference automatically.
 With a real Muse:
 
 ```bash
-EEG_SOURCE=osc python -m backend.server        # Mind Monitor on a phone → OSC/UDP
+MUSE_OSC_HOST=192.168.1.42 EEG_SOURCE=osc python -m backend.server
+# MUSE_OSC_HOST must be the Mind Monitor phone's exact IPv4 address.
 EEG_SOURCE=brainflow MUSE_BOARD_ID=39 python -m backend.server
 ```
 
@@ -315,9 +355,17 @@ laptop and into the presenter's pocket — ~30 cm instead of ~3 m, worth about
 20 dB of link budget in a room with several hundred radios fighting over an
 83 MHz band. Board IDs: Muse 2 = 38, Muse S = 39, Muse S Athena = 67.
 
-> Venue WiFi usually enables AP client isolation, which silently drops
-> phone→laptop UDP with no error anywhere. If no packets arrive, put the laptop
-> on the phone's hotspot. **Test this first, not at 3am.**
+OSC has no built-in authentication, so Bench will not open its UDP listener to
+the network until `MUSE_OSC_HOST` names the phone's exact IPv4 address. Packets
+from every other source are discarded before they reach the estimator. This is
+an explicit sender pairing, not encryption; keep using a private hotspot. EEG
+gestures can record deliberate flags, but they never call a privileged promote
+API automatically—promotion still requires an authenticated operator action.
+
+> Venue WiFi may expose the laptop to untrusted peers and often enables AP
+> client isolation, which silently drops phone→laptop UDP with no error
+> anywhere. Put the laptop on a private phone hotspot for both security and
+> reliability. **Test this first, not at 3am.**
 
 ### Stage controls
 
@@ -328,7 +376,7 @@ Arrow keys beat sliders under stage lights.
 | `←` / `→` | look left / right |
 | `↑` / `↓` | focused / diffuse |
 | `b` | double-blink (flag) |
-| `c` | jaw clench (confirm) |
+| `c` | jaw clench (deliberate flag; never auto-promotes) |
 
 ---
 
@@ -386,6 +434,10 @@ Run both processes for the full loop:
 python -m backend.server                 # :8000  bench
 python gesture/gesture_server.py         # :8765  votes
 ```
+
+Both helper streams are loopback-only and must run on the bench laptop. The
+gesture process automatically tries the local `ws://` and verified `wss://`
+status feeds, so the effort/focus overlay also works with `--lan --https`.
 
 No webcam, or MediaPipe won't install (it has no wheel for Python 3.13/3.14)?
 `gesture/mock_votes.py` speaks the identical protocol on the identical port, so

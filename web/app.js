@@ -112,7 +112,7 @@ function renderAttention(a, variants) {
 
   const selected = (variants || []).find((v) => v.id === a.selected);
   nodes.tableCaption.textContent = selected
-    ? `Holding on ${selected.label} — double-blink to flag it, jaw-clench to promote.`
+    ? `Holding on ${selected.label} — double-blink or jaw-clench to flag it.`
     : 'Look at a design. It highlights. No calibration.';
 }
 
@@ -180,17 +180,29 @@ function toast(message) {
 async function loadPairing() {
   try {
     const info = await (await fetch('/api/pair')).json();
-    nodes.pairQr.src = '/api/pair/qr.svg';
-    nodes.pairLink.href = info.url;
-    nodes.pairUrl.textContent = info.url;
-    nodes.pairWarn.classList.toggle('hidden', info.cameraAllowed);
 
     // On the hosted demo there is no LAN address to advertise, so say what the
     // code actually is rather than implying a bench is waiting behind it.
     if (info.demo) {
+      nodes.pairQr.src = '/api/pair/qr.svg';
+      nodes.pairLink.href = info.url;
+      nodes.pairUrl.textContent = info.url;
       nodes.pairWarn.classList.remove('hidden');
       nodes.pairWarn.innerHTML = 'Demo code — it opens this site\'s phone page. '
         + 'A running bench renders one for its own LAN address, and frames land on it.';
+    } else if (!info.lanMode) {
+      nodes.pairQr.removeAttribute('src');
+      nodes.pairLink.removeAttribute('href');
+      nodes.pairUrl.textContent = 'LAN pairing disabled';
+      nodes.pairWarn.classList.remove('hidden');
+      nodes.pairWarn.innerHTML = 'Secure loopback mode is active. Restart with '
+        + '<code>--lan --https</code> to pair a phone; LAN mode requires the '
+        + 'per-session operator token printed in the terminal.';
+    } else {
+      nodes.pairQr.src = '/api/pair/qr.svg';
+      nodes.pairLink.href = info.url;
+      nodes.pairUrl.textContent = info.url;
+      nodes.pairWarn.classList.toggle('hidden', info.cameraAllowed);
     }
   } catch {
     nodes.pairUrl.textContent = 'pairing unavailable';
@@ -243,7 +255,6 @@ function connect() {
       const where = latest.variants.find((v) => v.id === msg.flag.zone);
       const how = msg.flag.source === 'jaw_clench' ? 'Jaw clench' : 'Double-blink';
       toast(`${how} — flagged${where ? ` while looking at ${where.label}` : ''}.`);
-      if (msg.flag.source === 'jaw_clench' && msg.flag.zone) promote(msg.flag.zone);
     }
 
     if (msg.type === 'project') {

@@ -17,6 +17,7 @@ another wheel to install at 3am.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -43,14 +44,19 @@ def ensure_cert(ip: str) -> tuple[str, str]:
         "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
         "-keyout", str(KEY_FILE), "-out", str(CERT_FILE),
         "-days", "365", "-subj", "/CN=bench", "-addext", san,
+        # Some packaged OpenSSL builds point at a nonexistent global config.
+        # Every field we need is explicit, so an empty platform-native config
+        # keeps certificate generation portable (NUL on Windows, /dev/null on
+        # POSIX) without inheriting machine-wide settings.
+        "-config", os.devnull,
     ]
     try:
         subprocess.run(cmd, check=True, capture_output=True)
     except FileNotFoundError as exc:
         raise RuntimeError(
             "openssl is not on PATH, so the HTTPS certificate cannot be made. "
-            "Run without --https and pair over http (the phone will load the "
-            "page but the browser will refuse the camera), or install openssl."
+            "Install openssl to use authenticated LAN/phone mode, or run the "
+            "bench loopback-only without --lan."
         ) from exc
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.decode(errors="replace").strip().splitlines()[-1:] or [""]

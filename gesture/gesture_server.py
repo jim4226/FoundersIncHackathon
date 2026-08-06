@@ -5,7 +5,7 @@ Reads a webcam, recognizes thumbs-up / thumbs-down with MediaPipe's built-in
 Gesture Recognizer, debounces for demo stability, and broadcasts an
 approve/reject event over a WebSocket that the renderer subscribes to.
 
-It also *subscribes back* to the bench (`ws://localhost:8000/ws`) when it is
+It also *subscribes back* to the bench's loopback-only status feed when it is
 running, so the hand overlay reflects the fused verdict: the silhouette glow
 tracks live EEG effort, a tag shows which design is in focus, and a vote flash
 shows what actually happened (promoted / held-because-diffuse / no-focus). If
@@ -16,9 +16,13 @@ Keys: ESC quit  |  a = force approve  |  r = force reject  (stage fallback)
 """
 
 import os
+import ssl
 import time
 import json
 import threading
+from contextlib import contextmanager
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import cv2
 import numpy as np
@@ -33,9 +37,15 @@ HOLD_SECONDS   = 0.6      # gesture must be held this long before it fires
 COOLDOWN_SECS  = 2.0      # after firing, ignore new triggers this long
 CAM_INDEX      = 0        # dedicated webcam pointed at the hand
 WS_PORT        = 8765
+WS_HOST        = "127.0.0.1"  # raw gesture telemetry stays on this laptop
 MODEL_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "gesture_recognizer.task")  # resolve next to script
-BENCH_WS_URL   = os.environ.get("BENCH_WS_URL", "ws://localhost:8000/ws")
+BENCH_WS_URL   = os.environ.get("BENCH_WS_URL")
+BENCH_STATUS_PATH = "/ws/internal/status"
+BENCH_CA_FILE  = os.environ.get(
+    "BENCH_CA_FILE",
+    str(Path(__file__).resolve().parent.parent / ".bench-certs" / "cert.pem"),
+)
 FLASH_SECS     = 2.5      # how long a vote verdict stays on screen
 
 GESTURE_MAP = {"Thumb_Up": "approve", "Thumb_Down": "reject"}
@@ -76,7 +86,12 @@ def broadcast(event: dict):
 
 
 def start_ws():
-    with serve(ws_handler, "0.0.0.0", WS_PORT) as server:
+    with serve(
+        ws_handler,
+        WS_HOST,
+        WS_PORT,
+        origins=[None],  # non-browser local bridge only; blocks hostile webpages
+    ) as server:
         print(f"[ws] broadcasting on ws://localhost:{WS_PORT}")
         server.serve_forever()
 
@@ -166,15 +181,57 @@ def handle_bench_message(msg):
         set_flash("no design in focus", C_NEUTRAL)
 
 
-def bench_subscriber():
-    """Reconnecting client to the bench /ws. Never raises into the main loop."""
+def _bench_urls():
+    """Try local HTTP then HTTPS unless the operator supplied an exact URL."""
+    if BENCH_WS_URL:
+        return [BENCH_WS_URL]
+    return [
+        f"ws://localhost:8000{BENCH_STATUS_PATH}",
+        f"wss://localhost:8000{BENCH_STATUS_PATH}",
+    ]
+
+
+def _bench_connect_kwargs(url):
+    if urlsplit(url).scheme != "wss":
+        return {}
+    # backend.tls generates this certificate with localhost in its SAN. Loading
+    # it as the trust anchor preserves verification without weakening TLS.
+    if not Path(BENCH_CA_FILE).is_file():
+        raise FileNotFoundError(
+            f"Bench CA certificate not found: {BENCH_CA_FILE}. "
+            "Start the bench with --lan --https first or set BENCH_CA_FILE."
+        )
+    return {"ssl": ssl.create_default_context(cafile=BENCH_CA_FILE)}
+
+
+@contextmanager
+def _connect_bench():
     from websockets.sync.client import connect
+
+    last_error = None
+    for url in _bench_urls():
+        try:
+            ws = connect(url, open_timeout=5, **_bench_connect_kwargs(url))
+        except Exception as exc:
+            last_error = exc
+            continue
+        try:
+            yield url, ws
+        finally:
+            ws.close()
+        return
+    if last_error:
+        raise last_error
+
+
+def bench_subscriber():
+    """Reconnecting client to the loopback-only status feed."""
     while True:
         try:
-            with connect(BENCH_WS_URL, open_timeout=5) as ws:
+            with _connect_bench() as (url, ws):
                 with bench_lock:
                     bench["connected"] = True
-                print(f"[bench] connected to {BENCH_WS_URL}")
+                print(f"[bench] connected to {url}")
                 for raw in ws:
                     try:
                         handle_bench_message(json.loads(raw))
